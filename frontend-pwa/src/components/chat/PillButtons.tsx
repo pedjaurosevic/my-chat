@@ -16,7 +16,7 @@ interface PillButtonsProps {
 
 const PillButtons: React.FC<PillButtonsProps> = ({ buttons }) => {
   return (
-    <div className="flex flex-wrap justify-center gap-2 p-4 border-t border-gray-800">
+    <div className="flex flex-wrap justify-center gap-1.5 p-3 border-t border-gray-800">
       {buttons.map((button) => {
         const Icon = button.icon
         return (
@@ -25,7 +25,7 @@ const PillButtons: React.FC<PillButtonsProps> = ({ buttons }) => {
             onClick={button.action}
             className="pill-btn pill-btn-inactive"
           >
-            {Icon && <Icon className="w-4 h-4" />}
+            {Icon && <Icon className="w-3.5 h-3.5" />}
             <span>{button.label}</span>
           </button>
         )

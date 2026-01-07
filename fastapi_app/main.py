@@ -39,28 +39,25 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(title=PROJECT_NAME, version=VERSION, description=DESCRIPTION)
 
-# CORS middleware (disabled for now)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # In production, restrict to your frontend domain
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Mount static files (disabled for now)
-# app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Mount static files
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Temporarily disable API routers to focus on chat functionality
-# app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
-# app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
-# app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
-# app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-# app.include_router(export.router, prefix="/api/export", tags=["export"])
-# app.include_router(dialogue.router, prefix="/api/dialogue", tags=["dialogue"])
-
-
-# TODO: Add chat endpoint back when Ollama integration is working
+# API routers
+app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
+app.include_router(export.router, prefix="/api/export", tags=["export"])
+app.include_router(dialogue.router, prefix="/api/dialogue", tags=["dialogue"])
 
 
 @app.get("/")
@@ -68,13 +65,30 @@ async def serve_frontend():
     """Serve frontend HTML"""
     index_path = FRONTEND_DIR / "index.html"
     if index_path.exists():
-        return HTMLResponse(index_path.read_text(), media_type="text/html")
-    return HTMLResponse("<h1>Frontend not found</h1>", status_code=404)
+        return FileResponse(index_path)
+
+    # Fallback to a simple message
+    return HTMLResponse(f"""
+    <html>
+        <head><title>{PROJECT_NAME}</title></head>
+        <body>
+            <h1>{PROJECT_NAME} v{VERSION}</h1>
+            <p>Frontend files not found. Please build frontend.</p>
+            <p>API is running. Check <a href="/docs">/docs"> for API documentation.</p>
+        </body>
+    </html>
+    """)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": PROJECT_NAME, "version": VERSION}
 
 
 @app.get("/api")
 async def api_info():
-    """API information endpoint"""
+    """API information"""
     return {
         "name": PROJECT_NAME,
         "version": VERSION,
@@ -90,6 +104,37 @@ async def api_info():
             "health": "/health",
         },
     }
+
+
+@app.get("/manifest.json")
+async def serve_manifest():
+    """Serve PWA manifest"""
+    manifest_path = FRONTEND_DIR / "manifest.json"
+    if manifest_path.exists():
+        return FileResponse(manifest_path)
+
+    # Default manifest
+    return {
+        "name": PROJECT_NAME,
+        "short_name": "OllamaChat",
+        "description": DESCRIPTION,
+        "start_url": "/",
+        "display": "standalone",
+        "theme_color": "#000000",
+        "background_color": "#1a1a1a",
+        "icons": [],
+    }
+
+
+@app.get("/service-worker.js")
+async def serve_service_worker():
+    """Serve service worker"""
+    sw_path = FRONTEND_DIR / "service-worker.js"
+    if sw_path.exists():
+        return FileResponse(sw_path, media_type="application/javascript")
+
+    # Empty service worker
+    return "// Service worker not configured"
 
 
 @app.get("/health")
