@@ -57,7 +57,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
-app.include_router(dialogue.router, prefix="/api/dialogue", tags=["dialogue"])
+app.include_router(dialogue.router, prefix="/api", tags=["dialogue"])
 
 
 @app.get("/")

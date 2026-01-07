@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 
-from fastapi_app.core.dependencies import get_current_user
+from fastapi_app.core.dependencies import get_current_user, optional_auth
 from fastapi_app.core.ollama_client import chat_with_model
 from fastapi_app.core.config import MBTI_PERSONAS
 
@@ -84,10 +84,11 @@ def get_persona_prompt(persona: Optional[str]) -> str:
 
 @router.post("/dialogue/start")
 async def start_dialogue(
-    request: StartDialogueRequest, current_user: Dict = Depends(get_current_user)
+    request: StartDialogueRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Start a new dialogue between two AI models"""
-    dialogue_id = f"dialogue_{int(time.time())}_{current_user['user_id']}"
+    user_id = current_user.get("user_id", "guest") if current_user else "guest"
+    dialogue_id = f"dialogue_{int(time.time())}_{user_id}"
 
     # Create initial messages
     messages = []
@@ -108,7 +109,7 @@ async def start_dialogue(
         "max_rounds": request.max_rounds,
         "rounds_completed": 0,
         "topic": request.topic or request.initial_prompt[:100],
-        "user_id": current_user["user_id"],
+        "user_id": user_id,
     }
 
     # Get first response
@@ -117,7 +118,7 @@ async def start_dialogue(
 
 @router.post("/dialogue/{dialogue_id}/next")
 async def next_dialogue_round(
-    dialogue_id: str, current_user: Dict = Depends(get_current_user)
+    dialogue_id: str, current_user: Dict = Depends(optional_auth)
 ):
     """Get next response in the dialogue"""
     if dialogue_id not in dialogues:
@@ -207,7 +208,7 @@ async def next_dialogue_round(
 
 @router.post("/dialogue/{dialogue_id}/moderator")
 async def add_moderator_message(
-    dialogue_id: str, message: str, current_user: Dict = Depends(get_current_user)
+    dialogue_id: str, message: str, current_user: Dict = Depends(optional_auth)
 ):
     """Add moderator message to dialogue"""
     if dialogue_id not in dialogues:
@@ -227,9 +228,7 @@ async def add_moderator_message(
 
 
 @router.post("/dialogue/{dialogue_id}/save")
-async def save_dialogue(
-    dialogue_id: str, current_user: Dict = Depends(get_current_user)
-):
+async def save_dialogue(dialogue_id: str, current_user: Dict = Depends(optional_auth)):
     """Save dialogue to file"""
     if dialogue_id not in dialogues:
         raise HTTPException(
@@ -261,9 +260,7 @@ async def save_dialogue(
 
 
 @router.get("/dialogue/{dialogue_id}")
-async def get_dialogue(
-    dialogue_id: str, current_user: Dict = Depends(get_current_user)
-):
+async def get_dialogue(dialogue_id: str, current_user: Dict = Depends(optional_auth)):
     """Get dialogue by ID"""
     if dialogue_id not in dialogues:
         raise HTTPException(
@@ -282,7 +279,7 @@ async def get_dialogue(
 
 
 @router.get("/dialogues")
-async def list_dialogues(current_user: Dict = Depends(get_current_user)):
+async def list_dialogues(current_user: Dict = Depends(optional_auth)):
     """List user's dialogues"""
     user_dialogues = []
 
@@ -306,7 +303,7 @@ async def list_dialogues(current_user: Dict = Depends(get_current_user)):
 
 @router.delete("/dialogue/{dialogue_id}")
 async def delete_dialogue(
-    dialogue_id: str, current_user: Dict = Depends(get_current_user)
+    dialogue_id: str, current_user: Dict = Depends(optional_auth)
 ):
     """Delete dialogue"""
     if dialogue_id not in dialogues:
@@ -327,7 +324,7 @@ async def delete_dialogue(
 
 
 @router.get("/personas")
-async def list_personas(current_user: Dict = Depends(get_current_user)):
+async def list_personas(current_user: Dict = Depends(optional_auth)):
     """Get list of available MBTI personas"""
     personas = []
 
