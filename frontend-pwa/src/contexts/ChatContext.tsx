@@ -119,7 +119,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       messagesToSend.push({ role: 'user', content })
 
       // Real API call to FastAPI backend
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/chat/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -127,6 +127,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         body: JSON.stringify({
           message: content,
           model: model,
+          source: 'Ollama (11434)',
         }),
       })
 
