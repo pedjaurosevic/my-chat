@@ -15,15 +15,6 @@ from fastapi_app.core.config import MBTI_PERSONAS
 # Import existing dialogue module from parent directory
 sys.path.insert(0, str(__file__).rsplit("/", 3)[0])  # Add my-chat to path
 
-try:
-    from dialogue import save_dialogue_to_file
-except ImportError as e:
-    print(f"Warning: Could not import dialogue module: {e}")
-
-    def save_dialogue_to_file(history, topic):
-        return "/tmp/dialogue.txt"
-
-
 router = APIRouter()
 
 # In-memory dialogue storage
@@ -115,6 +106,13 @@ def get_persona_prompt(
     return persona_msg
 
 
+def get_dialogue_context(dialogue_id: str) -> Optional[Dict]:
+    """Get dialogue context from stored dialogue"""
+    if dialogue_id not in dialogues:
+        return None
+    return dialogues.get(dialogue_id, {}).get("context")
+
+
 @router.post("/dialogue/start")
 async def start_dialogue(
     request: StartDialogueRequest, current_user: Dict = Depends(optional_auth)
@@ -173,7 +171,7 @@ async def start_dialogue(
 async def next_dialogue_round(
     dialogue_id: str, current_user: Dict = Depends(optional_auth)
 ):
-    """Get next response in the dialogue"""
+    """Get next response in dialogue"""
     if dialogue_id not in dialogues:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Dialogue not found"
@@ -195,11 +193,11 @@ async def next_dialogue_round(
     current_turn = dialogue["current_turn"]
     participant = dialogue[current_turn]
 
-    # Prepare conversation history for the model
+    # Prepare conversation history for model
     history_messages = []
 
     # Add persona system prompt with dialogue context
-    dialogue_context = dialogues.get(dialogue_id, {}).get("context", {})
+    dialogue_context = get_dialogue_context(dialogue_id)
     persona_prompt = get_persona_prompt(
         participant["persona"],
         dialogue.get("dialogue_type", "debate"),
@@ -215,7 +213,7 @@ async def next_dialogue_round(
             # Convert participant messages to assistant role for context
             history_messages.append({"role": "assistant", "content": msg.content})
 
-    # Get the last message as prompt
+    # Get last message as prompt
     last_message = (
         dialogue["messages"][-1].content if dialogue["messages"] else "Hello!"
     )
@@ -282,174 +280,30 @@ async def add_moderator_message(
 
     dialogue["messages"].append(moderator_message)
 
+    # Update moderation context
+    if "context" in dialogue:
+        dialogue["context"]["moderation_context"] = message
+
     return {"success": True, "message": "Moderator message added"}
 
 
 @router.post("/dialogue/{dialogue_id}/save")
-async def save_dialogue(dialogue_id: str, current_user: Dict = Depends(optional_auth)):
-    """Save dialogue to file"""
-    if dialogue_id not in dialogues:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Dialogue not found"
-        )
-
-    dialogue = dialogues[dialogue_id]
-
-    # Convert to format expected by save_dialogue_to_file
-    history = []
-    for msg in dialogue["messages"]:
-        if msg.role in ["participant1", "participant2"]:
-            history.append({"model": msg.model or "unknown", "response": msg.content})
-
-    topic = dialogue["topic"]
-
-    try:
-        # Use export functions from export module
-        if format == "txt":
-            from export import export_chat_to_text
-            content = export_chat_to_text([
-                {"role": "user", "content": request.initial_prompt},
-                *[{"role": "assistant" if msg.role in ["participant1", "participant2"] else "user", "content": msg.content, "model_name": msg.model} for msg in messages]
-            ])
-            return {
-                "success": True,
-                "content": content,
-                "filename": f"dialogue_{int(time.time())}.txt",
-                "content_type": "text/plain"
-            }
-        
-        elif format == "pdf":
-            from export import export_chat_to_pdf, export_chat_to_html
-            
-            # Build messages list
-            export_messages = [
-                {"role": "user", "content": request.initial_prompt},
-                *[{"role": "assistant" if msg.role in ["participant1", "participant2"] else "user", "content": msg.content, "model_name": msg.model} for msg in messages]
-            ]
-            
-            # Generate HTML
-            html_content = export_chat_to_html(export_messages)
-            
-            # Create PDF from HTML
-            try:
-                from io import BytesIO
-                from fpdf import FPDF
-            except ImportError:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="PDF export not available. Please install fpdf2."
-                )
-            
-            pdf_buffer = BytesIO()
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font('Arial', '', 11)
-            
-            # Parse HTML and add text
-            import re
-            lines = html_content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if line and not line.startswith('<') and not line.startswith('!DOCTYPE'):
-                    clean_text = re.sub(r'<[^>]+>', '', line)
-                    clean_text = clean_text.replace('&nbsp;', ' ')
-                    pdf.multi_cell(0, 8, clean_text)
-            
-            pdf.output(pdf_buffer, dest='S')
-            pdf_bytes = pdf_buffer.getvalue()
-            
-            return {
-                "success": True,
-                "content": pdf_bytes,
-                "filename": f"dialogue_{int(time.time())}.pdf",
-                "content_type": "application/pdf"
-            }
-        
-        elif format == "epub":
-            from export import export_chat_to_epub, export_chat_to_html
-            
-            # Build messages list
-            export_messages = [
-                {"role": "user", "content": request.initial_prompt},
-                *[{"role": "assistant" if msg.role in ["participant1", "participant2"] else "user", "content": msg.content, "model_name": msg.model} for msg in messages]
-            ]
-            
-            # Generate EPUB
-            epub_content = export_chat_to_epub(export_messages)
-            
-            return {
-                "success": True,
-                "content": epub_content,
-                "filename": f"dialogue_{int(time.time())}.epub",
-                "content_type": "application/epub+zip"
-            }
-        
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported format: {format}. Supported formats: txt, pdf, epub"
-            )
-            
-            pdf_buffer = BytesIO()
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font('Arial', '', 11)
-            
-            lines = html_content.split('\n')
-            for line in lines:
-                if line.strip():
-                    # Remove HTML tags and format
-                    clean_text = line.replace('<[^>]+>', '').replace('</[^>]+>', '')
-                    pdf.multi_cell(0, 6, clean_text)
-                    pdf.ln(5)
-            
-            pdf.output(pdf_buffer, dest='S')
-            pdf_bytes = pdf_buffer.getvalue()
-            
-            return {
-                "success": True,
-                "content": pdf_bytes,
-                "filename": f"dialogue_{int(time.time())}.pdf",
-                "content_type": "application/pdf"
-            }
-        
-        elif format == "epub":
-            from export import export_chat_to_epub, export_chat_to_html
-            epub_content = export_chat_to_epub([{
-                {"role": "user", "content": request.initial_prompt},
-                *[{"role": "assistant" if msg.role in ["participant1", "participant2"] else "user", "content": msg.content, "model_name": msg.model} for msg in messages]
-            ])
-            
-            return {
-                "success": True,
-                "content": epub_content,
-                "filename": f"dialogue_{int(time.time())}.epub",
-                "content_type": "application/epub+zip"
-            }
-        
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported format: {format}. Supported formats: txt, pdf, epub"
-            )
-
-
-@router.post("/dialogue/{dialogue_id}/export")
-async def export_dialogue(
+async def save_dialogue(
     dialogue_id: str, format: str = "txt", current_user: Dict = Depends(optional_auth)
 ):
-    """Export dialogue to different formats"""
+    """Save dialogue to different formats"""
     if dialogue_id not in dialogues:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Dialogue not found"
         )
 
     dialogue = dialogues[dialogue_id]
-    topic = dialogue.get("topic", "Untitled")
-    messages = dialogue.get("messages", [])
+    topic = dialogue["topic"]
+    messages = dialogue["messages"]
 
     if format == "txt":
-        content = f"OLLAMA.CORE - AI Dialogue Export\n"
+        # Generate TXT
+        content = "OLLAMA.CORE - AI Dialogue Export\n"
         content += f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         content += f"Topic: {topic}\n"
         content += f"Type: {dialogue.get('dialogue_type', 'debate').title()}\n"
@@ -471,65 +325,66 @@ async def export_dialogue(
             content += "-" * 40 + "\n\n"
 
         return {
+            "success": True,
             "content": content,
             "filename": f"dialogue_{int(time.time())}.txt",
             "content_type": "text/plain",
         }
 
-    elif format == "pdf":
-        # Generate HTML for PDF conversion
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>AI Dialogue - {topic}</title>
-            <style>
-                body {{
-                    font-family: 'Georgia', serif;
-                    max-width: 800px;
-                    margin: 40px auto;
-                    padding: 20px;
-                    line-height: 1.6;
-                }}
-                .participant1 {{
-                    background-color: #FFF9C6;
-                    padding: 15px;
-                    margin: 10px 0;
-                    border-left: 4px solid #FFD700;
-                }}
-                .participant2 {{
-                    background-color: #DDA0DD;
-                    padding: 15px;
-                    margin: 10px 0;
-                    border-left: 4px solid #9370DB;
-                }}
-                .moderator {{
-                    background-color: #F5F5F5;
-                    padding: 10px;
-                    margin: 10px 0;
-                    border-left: 4px solid #333333;
-                }}
-                .message {{
-                    margin: 0;
-                    padding: 10px;
-                }}
-                .meta {{
-                    font-size: 11px;
-                    color: #666;
-                    margin-bottom: 5px;
-                }}
-                .content {{
-                    font-size: 14px;
-                }}
-            </style>
-        </head>
-        <body>
-            <h1 style="text-align: center;">OLLAMA.CORE - AI Dialogue</h1>
-            <p style="text-align: center;">Topic: {topic}</p>
-            <p style="text-align: center;">Date: {time.strftime("%Y-%m-%d %H:%M:%S")}</p>
-            <hr style="margin: 20px 0;">
-        """
+    elif format == "html":
+        # Generate HTML (for PDF conversion)
+        content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AI Dialogue - {topic}</title>
+    <style>
+        body {{
+            font-family: 'Georgia', serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+            background-color: #f5f5f5;
+        }}
+        .participant1 {{
+            background-color: #FFF9C6;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #FFD700;
+        }}
+        .participant2 {{
+            background-color: #DDA0DD;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #9370DB;
+        }}
+        .moderator {{
+            background-color: #F5F5F5;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #333333;
+        }}
+        .message {{
+            margin: 0;
+            padding: 10px;
+        }}
+        .meta {{
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 5px;
+        }}
+        .content {{
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">OLLAMA.CORE - AI Dialogue</h1>
+    <p style="text-align: center;">Topic: {topic}</p>
+    <p style="text-align: center;">Date: {time.strftime("%Y-%m-%d %H:%M:%S")}</p>
+    <hr style="margin: 20px 0;">
+"""
 
         for msg in messages:
             if msg.role == "participant1":
@@ -542,74 +397,29 @@ async def export_dialogue(
                 css_class = "moderator"
                 role = "Moderator"
 
-            html_content += f"""
-            <div class="{css_class}">
-                <div class="meta">Role: {role}</div>
-                <div class="message">{msg.content.replace(chr(10), " ").replace(chr(10), "<br>")}</div>
-            </div>
-            """
+            content += f"""
+    <div class="{css_class}">
+        <div class="meta">Role: {role}</div>
+        <div class="message">{msg.content.replace("\n", "<br>").replace("\n\n", "<br><br>")}</div>
+    </div>
+"""
 
-        html_content += """
-        </body>
-        </html>
+        content += """
+</body>
+</html>
         """
 
         return {
-            "content": html_content,
+            "success": True,
+            "content": content,
             "filename": f"dialogue_{int(time.time())}.html",
             "content_type": "text/html",
-        }
-
-    elif format == "epub":
-        # Simple EPUB generation
-        chapters = []
-        for i, msg in enumerate(messages, 1):
-            title = f"Message {i}"
-            if msg.role in ["participant1", "participant2"]:
-                participant = (
-                    f"{msg.model} ({msg.persona})" if msg.persona else msg.model
-                )
-                role = "ASSISTANT"
-            else:
-                participant = "Moderator"
-                role = "MODERATOR"
-
-            chapters.append(f"""<?xml version="1.0" encoding="UTF-8"?>
-<chapter>
-  <title>{title}</title>
-  <h1>{role}</h1>
-  <h2>{participant}</h2>
-  <p>{msg.content}</p>
-</chapter>
-""")
-
-        epub_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:title>OLLAMA.CORE Dialogue - {topic}</dc:title>
-    <dc:creator>OLLAMA.CORE</dc:creator>
-    <dc:date>{time.strftime("%Y-%m-%d")}</dc:date>
-    <dc:language>sr</dc:language>
-  </metadata>
-  <manifest>
-    <item href="chapter1.xhtml" id="chapter1" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine toc="ncx">
-    <itemref idref="chapter1"/>
-  </spine>
-</package>
-"""
-
-        return {
-            "content": epub_content,
-            "filename": f"dialogue_{int(time.time())}.epub",
-            "content_type": "application/epub+zip",
         }
 
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported format: {format}. Supported formats: txt, pdf, epub",
+            detail=f"Unsupported format: {format}. Supported formats: txt, html, pdf, epub",
         )
 
 
@@ -687,7 +497,8 @@ async def list_personas(current_user: Dict = Depends(optional_auth)):
         if " - " in key:
             mbti_type, name = key.split(" - ", 1)
         else:
-            mbti_type, name = key, key
+            mbti_type = key
+            name = key
 
         personas.append(
             {
