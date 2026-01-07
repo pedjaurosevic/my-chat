@@ -31,18 +31,12 @@ def get_models_cached(source: str) -> List[str]:
     os.environ["OLLAMA_HOST"] = get_ollama_host(source)
 
     try:
-        result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
-        if result.returncode != 0:
-            return []
-
-        models = []
-        lines = result.stdout.strip().split("\n")
-        for line in lines[1:]:  # Skip header
-            if "->" in line:
-                model_name = line.split("->")[0].strip()
-                models.append(model_name)
-
-        return models
+        response = ollama.list()
+        if hasattr(response, "models"):
+            return [m.model for m in response.models]
+        elif isinstance(response, dict) and "models" in response:
+            return [m["name"] for m in response["models"]]
+        return []
     finally:
         # Restore original OLLAMA_HOST
         if original_host is not None:

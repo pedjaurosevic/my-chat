@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from fastapi_app.core.dependencies import get_current_user
+from fastapi_app.core.dependencies import get_current_user, optional_auth
 from fastapi_app.core.ollama_client import (
     chat_with_model,
     get_cached_response,
@@ -56,7 +56,7 @@ def get_session_key(user_id: str, session_id: str = "default") -> str:
 
 @router.get("/models")
 async def list_models(
-    source: str = DEFAULT_MODEL_SOURCE, current_user: Dict = Depends(get_current_user)
+    source: str = DEFAULT_MODEL_SOURCE, current_user: Dict = Depends(optional_auth)
 ):
     """Get list of available models"""
     if source not in MODEL_SOURCES:
@@ -71,7 +71,7 @@ async def list_models(
 
 @router.post("/send")
 async def send_message(
-    request: ChatRequest, current_user: Dict = Depends(get_current_user)
+    request: ChatRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Send message and get immediate response (non-streaming)"""
     start_time = time.time()
@@ -151,7 +151,7 @@ async def send_message(
 
 @router.post("/stream")
 async def stream_message(
-    request: ChatRequest, current_user: Dict = Depends(get_current_user)
+    request: ChatRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Stream response via Server-Sent Events (SSE)"""
 

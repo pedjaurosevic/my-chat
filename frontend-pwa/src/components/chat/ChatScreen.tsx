@@ -11,7 +11,7 @@ import AgentsPanel from './AgentsPanel'
 import ExportPanel from './ExportPanel'
 
 const ChatScreen: React.FC = () => {
-  const { messages, isLoading, sendMessage, currentModel, setCurrentModel } = useChat()
+  const { messages, isLoading, sendMessage, currentModel, setCurrentModel, availableModels, setAvailableModels } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -21,6 +21,20 @@ const ChatScreen: React.FC = () => {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetch('/api/chat/models?source=Ollama (11434)')
+        if (!response.ok) throw new Error('Failed to fetch models')
+        const data = await response.json()
+        setAvailableModels(data.models || [])
+      } catch (error) {
+        console.error('Failed to fetch models:', error)
+      }
+    }
+    fetchModels()
+  }, [setAvailableModels])
 
   const handleSendMessage = async (content: string) => {
     await sendMessage(content)
@@ -34,18 +48,17 @@ const ChatScreen: React.FC = () => {
         <select
           value={currentModel}
           onChange={(e) => setCurrentModel(e.target.value)}
-          className="bg-surface text-white px-3 py-1 rounded-lg border border-gray-600 text-sm"
+          className="bg-surface text-white px-3 py-1 rounded-lg border border-gray-600 text-sm max-w-xs"
         >
-          <option value="gpt-oss:120b-cloud">GPT-OSS 120B Cloud</option>
-          <option value="gpt-oss:20b-cloud">GPT-OSS 20B Cloud</option>
-          <option value="deepseek-v3.2:cloud">DeepSeek V3.2 Cloud</option>
-          <option value="kimi-k2:1t-cloud">Kimi K2 1T Cloud</option>
-          <option value="qwen3:14b">Qwen3 14B</option>
-          <option value="qwen2.5:32b">Qwen2.5 32B</option>
-          <option value="gemma3:27b-cloud">Gemma3 27B Cloud</option>
-          <option value="deepseek-r1:14b">DeepSeek R1 14B</option>
-          <option value="llama3.2:3b">Llama 3.2:3B (Local)</option>
-          <option value="tinyllama:latest">TinyLlama (Local)</option>
+          {availableModels.length > 0 ? (
+            availableModels.map((model: string) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))
+          ) : (
+            <option value="loading">Loading models...</option>
+          )}
         </select>
       </div>
 

@@ -16,6 +16,8 @@ interface ChatContextType {
   clearMessages: () => void
   currentModel: string
   setCurrentModel: (model: string) => void
+  availableModels: string[]
+  setAvailableModels: (models: string[]) => void
   systemPrompt: string
   setSystemPrompt: (prompt: string) => void
   documentContent: string
@@ -64,6 +66,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentModel, setCurrentModel] = useState('gpt-oss:20b-cloud')
+  const [availableModels, setAvailableModels] = useState<string[]>([])
   const [systemPrompt, setSystemPrompt] = useState('You are a helpful AI assistant.')
   const [documentContent, setDocumentContent] = useState('')
   const [showSystem, setShowSystem] = useState(false)
@@ -243,6 +246,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     clearMessages,
     currentModel,
     setCurrentModel,
+    availableModels,
+    setAvailableModels,
     systemPrompt,
     setSystemPrompt,
     documentContent,
