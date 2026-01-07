@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useChat } from '../../contexts/ChatContext'
-import { X, Play, Save, MessageSquare, Users } from 'lucide-react'
+import { X, Play, Save, MessageSquare, Users, ChevronDown } from 'lucide-react'
 
 interface DialogueMessage {
   role: string
@@ -24,6 +24,8 @@ const DialoguePanel: React.FC = () => {
     { id: 4, model: 'llama3.2:3b', persona: 'ENFJ - Protagonista' },
     { id: 5, model: 'user', persona: 'User' },
   ])
+  const [dialogueId, setDialogueId] = useState<string | null>(null)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [initialPrompt, setInitialPrompt] = useState('')
   const [messages, setMessages] = useState<DialogueMessage[]>([])
   const [currentRound, setCurrentRound] = useState(0)
@@ -50,62 +52,77 @@ const DialoguePanel: React.FC = () => {
   ]
 
   const handleStartDialogue = async () => {
-    if (!initialPrompt) return
+    setUserInput('')
+    setCurrentRound(0)
 
     setIsLoading(true)
     try {
+      let response
+
       if (mode === 'two') {
-        // Two-model debate
-        const response = await fetch('/api/chat/send', {
+        response = await fetch('/api/dialogue/dialogue/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: initialPrompt,
-            model: model1,
-            source: 'Ollama (11434)',
+            participant1: { model: model1, persona: persona1 },
+            participant2: { model: model2, persona: persona2 },
+            initial_prompt: initialPrompt,
+            max_rounds: 5,
+            dialogue_type: 'debate',
           }),
         })
-
-        const data = await response.json()
-        setMessages([
-          {
-            role: 'user',
-            name: 'Moderator',
-            content: initialPrompt,
-            model: 'moderator',
-          },
-          {
-            role: 'assistant',
-            name: `${model1} (${persona1})`,
-            content: data.response,
-            model: model1,
-            persona: persona1,
-          },
-        ])
       } else {
-        // Multi-model debate - get responses from all 4 AI models
-        const responses = await Promise.all(
-          multiParticipants
-            .filter((p) => p.model !== 'user')
-            .slice(0, 4)
-            .map(async (participant) => {
-              const response = await fetch('/api/chat/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  message: initialPrompt,
-                  model: participant.model,
-                  source: 'Ollama (11434)',
-                }),
-              })
-              const data = await response.json()
-              return {
-                role: 'assistant' as const,
-                name: `${participant.model} (${participant.persona})`,
-                content: data.response,
-                model: participant.model,
-                persona: participant.persona,
-              }
+        response = await fetch('/api/dialogue/dialogue/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            participant1: { model: multiParticipants[0].model, persona: multiParticipants[0].persona },
+            participant2: { model: multiParticipants[1].model, persona: multiParticipants[1].persona },
+            initial_prompt: initialPrompt,
+            max_rounds: 10,
+            dialogue_type: 'discussion',
+          }),
+        })
+      }
+
+      const data = await response.json()
+      setDialogueId(data.dialogue_id)
+
+      setMessages([
+        {
+          role: 'user',
+          name: 'Moderator',
+          content: initialPrompt,
+          model: 'moderator',
+        },
+        ...(data.messages || []),
+      ])
+      setCurrentRound(1)
+    } catch (error) {
+      console.error('Dialogue error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+      setMessages([
+        {
+          role: 'user',
+          name: 'Moderator',
+          content: initialPrompt,
+          model: 'moderator',
+        },
+        ...data.messages,
+       ])
+
+      setCurrentRound(1)
+    } catch (error) {
+      console.error('Dialogue error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+  }
             }),
         )
 
@@ -128,7 +145,6 @@ const DialoguePanel: React.FC = () => {
   }
 
   const handleNextRound = async () => {
-    if (mode === 'two') {
       // Alternate between model1 and model2
       const currentModel = currentRound % 2 === 0 ? model2 : model1
       const currentPersona = currentRound % 2 === 0 ? persona2 : persona1
@@ -216,18 +232,56 @@ const DialoguePanel: React.FC = () => {
     }
   }
 
-  const handleSaveDialogue = () => {
-    const content = messages
-      .map((msg) => `[${msg.role.toUpperCase()} - ${msg.name}]\n${msg.content}\n\n`)
-      .join('\n' + '-'.repeat(50) + '\n\n')
+  const handleSaveDialogue = (format: 'txt' | 'pdf' | 'epub') => {
+    if (format === 'txt') {
+      const content = messages
+        .map((msg) => `[${msg.role.toUpperCase()} - ${msg.name}]\n${msg.content}\n\n`)
+        .join('\n' + '-'.repeat(50) + '\n\n')
 
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `dialogue_${Date.now()}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
+      const blob = new Blob([content], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dialogue_${Date.now()}.txt`
+      a.click()
+      URL.revokeObjectURL(url)
+    } else if (format === 'pdf') {
+      try {
+        const response = await fetch(`/api/dialogue/dialogue_${dialogueId}/export?format=pdf`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+        const data = await response.json()
+        const blob = new Blob([data.content], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = data.filename
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (error) {
+        console.error('PDF export error:', error)
+        alert('PDF export failed. Please try TXT format.')
+      }
+    } else if (format === 'epub') {
+      try {
+        const response = await fetch(`/api/dialogue/dialogue_${dialogueId}/export?format=epub`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+        const data = await response.json()
+        const blob = new Blob([data.content], { type: 'application/epub+zip' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = data.filename
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (error) {
+        console.error('EPUB export error:', error)
+        alert('EPUB export failed. Please try TXT format.')
+      }
+    }
   }
 
   const isUserTurn = mode === 'multi' && currentRound % 5 === 4 && !isLoading
@@ -435,13 +489,38 @@ const DialoguePanel: React.FC = () => {
                   )}
                   {isLoading ? 'Thinking...' : isUserTurn ? 'Submit Response' : 'Next Round'}
                 </button>
-                <button
-                  onClick={handleSaveDialogue}
-                  className="btn-secondary flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  Save
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                    className="btn-secondary flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" />
+                    Export
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  {exportMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 bg-surface border border-gray-600 rounded-lg shadow-lg z-10 p-2 min-w-[150px]">
+                      <button
+                        onClick={() => handleSaveDialogue('txt')}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-white text-sm"
+                      >
+                        📄 Save as TXT
+                      </button>
+                      <button
+                        onClick={() => handleSaveDialogue('pdf')}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-white text-sm"
+                      >
+                        📕 Save as PDF
+                      </button>
+                      <button
+                        onClick={() => handleSaveDialogue('epub')}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-white text-sm"
+                      >
+                        📚 Save as EPUB
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
