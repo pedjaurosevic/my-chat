@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from fastapi_app.core.dependencies import get_current_user
+from fastapi_app.core.dependencies import get_current_user, optional_auth
 
 # Import existing agents from parent directory
 sys.path.insert(0, str(__file__).rsplit("/", 3)[0])  # Add my-chat to path
@@ -73,7 +73,7 @@ class ApiCallRequest(BaseModel):
 
 @router.post("/web-search")
 async def agent_web_search(
-    request: WebSearchRequest, current_user: Dict = Depends(get_current_user)
+    request: WebSearchRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Web search using Brave API or Google fallback"""
     try:
@@ -88,7 +88,7 @@ async def agent_web_search(
 
 @router.post("/web-scrape")
 async def agent_web_scrape(
-    request: WebScrapeRequest, current_user: Dict = Depends(get_current_user)
+    request: WebScrapeRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Scrape webpage content"""
     try:
@@ -107,7 +107,7 @@ async def agent_web_scrape(
 
 @router.post("/analyze-document")
 async def agent_analyze_document(
-    file: UploadFile = File(...), current_user: Dict = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: Dict = Depends(optional_auth)
 ):
     """Analyze uploaded document (PDF, EPUB, TXT, DOCX)"""
     try:
@@ -149,7 +149,7 @@ async def agent_analyze_document(
 
 @router.post("/code-helper")
 async def agent_code_helper(
-    request: CodeHelperRequest, current_user: Dict = Depends(get_current_user)
+    request: CodeHelperRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Code analysis, debugging, or explanation"""
     try:
@@ -167,7 +167,7 @@ async def agent_code_helper(
 
 
 @router.get("/news")
-async def agent_news(current_user: Dict = Depends(get_current_user)):
+async def agent_news(current_user: Dict = Depends(optional_auth)):
     """Get top news from RSS feeds"""
     try:
         news = get_top_news()
@@ -181,7 +181,7 @@ async def agent_news(current_user: Dict = Depends(get_current_user)):
 
 @router.post("/api-call")
 async def agent_api_call(
-    request: ApiCallRequest, current_user: Dict = Depends(get_current_user)
+    request: ApiCallRequest, current_user: Dict = Depends(optional_auth)
 ):
     """Make API calls (GET, POST, PUT, DELETE)"""
     try:
@@ -201,7 +201,7 @@ async def agent_api_call(
 
 
 @router.get("/available-agents")
-async def list_agents(current_user: Dict = Depends(get_current_user)):
+async def list_agents(current_user: Dict = Depends(optional_auth)):
     """List available AI agents"""
     agents = [
         {

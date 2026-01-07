@@ -9,6 +9,7 @@ import HistoryPanel from './HistoryPanel'
 import DocumentUpload from './DocumentUpload'
 import AgentsPanel from './AgentsPanel'
 import ExportPanel from './ExportPanel'
+import DialoguePanel from './DialoguePanel'
 
 const ChatScreen: React.FC = () => {
   const { messages, isLoading, sendMessage, currentModel, setCurrentModel, availableModels, setAvailableModels } = useChat()
@@ -98,6 +99,7 @@ const ChatScreen: React.FC = () => {
       <HistoryPanel />
       <DocumentUpload />
       <AgentsPanel />
+      <DialoguePanel />
       <ExportPanel />
 
       {/* Chat Input */}
