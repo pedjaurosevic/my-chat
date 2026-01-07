@@ -1,0 +1,1632 @@
+import streamlit as st
+import ollama
+import os
+import json
+import time
+from pypdf import PdfReader
+from streamlit.components.v1 import html
+from functools import lru_cache
+import requests
+from bs4 import BeautifulSoup
+import urllib.parse
+from io import BytesIO
+
+# Postavke
+
+# Model Source Selection - Kiklop Integration
+if "model_source" not in st.session_state:
+    st.session_state.model_source = "Ollama (11434)"
+
+model_sources = ["Ollama (11434)", "Kiklop (11435)"]
+selected_source = st.sidebar.selectbox(
+    "🤖 Model Source:",
+    model_sources,
+    index=model_sources.index(st.session_state.model_source),
+    help="Choose Ollama (11434) for standard models or Kiklop (11435) for your fine-tuned model"
+)
+
+# Reset model when source changes
+if selected_source != st.session_state.model_source:
+    st.session_state.model_source = selected_source
+    st.session_state.last_model = None
+    st.rerun()
+
+# Update Ollama host dynamically
+os.environ["OLLAMA_HOST"] = selected_source.split(" (")[1].replace(")", "")
+
+st.set_page_config(page_title="COMMAND AI", layout="wide", initial_sidebar_state="collapsed")
+
+# Anti-indexing meta tags + Instapaper support
+st.markdown("""
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+    <meta name="googlebot" content="noindex, nofollow">
+    <meta name="bingbot" content="noindex, nofollow">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
+    <!-- Instapaper and readability support -->
+    <meta name="description" content="OLLAMA.CORE - AI Chat Conversation">
+    <meta property="og:title" content="OLLAMA.CORE - Chat Conversation">
+    <meta property="og:description" content="AI-powered chat conversation saved for offline reading">
+""", unsafe_allow_html=True)
+
+# Custom CSS - Monochromatic Theme
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+
+    /* White pulse animation for input */
+    @-webkit-keyframes white-pulse {
+        0% { border-color: #ffffff; -webkit-box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+        50% { border-color: #e0e0e0; -webkit-box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); }
+        100% { border-color: #ffffff; -webkit-box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+    }
+    @keyframes white-pulse {
+        0% { border-color: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+        50% { border-color: #e0e0e0; box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); }
+        100% { border-color: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+    }
+
+    /* Forsiranje pozadine svuda */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp {
+        background-color: #262626 !important;
+        color: #e0e0e0 !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* Uklanjanje donje margine/praznine koja može biti tamnija */
+    footer { display: none !important; }
+    
+    .stChatInputContainer {
+        position: fixed !important;
+        bottom: 20px !important;
+        left: 50% !important;
+        -webkit-transform: translateX(-50%);
+        transform: translateX(-50%);
+        border: 1px solid #ffffff !important; /* Bela ivica */
+        background-color: #262626 !important; /* Ista pozadina kao sajt */
+        max-width: 800px !important;
+        width: 90% !important;
+        border-radius: 12px !important;
+        -webkit-animation: white-pulse 4s infinite ease-in-out;
+        animation: white-pulse 4s infinite ease-in-out;
+        z-index: 1000;
+    }
+
+    /* Input text - White */
+    .stChatInputContainer textarea, .stChatInputContainer input {
+        color: #ffffff !important;
+        caret-color: #ffffff !important;
+    }
+
+    @media screen and (max-width: 1024px) {
+        .stChatInputContainer {
+            width: 85% !important;
+            max-width: 600px !important;
+        }
+    }
+
+    @media screen and (max-width: 768px) {
+        .stChatInputContainer {
+            width: 90% !important;
+            bottom: 15px !important;
+        }
+
+        h2 { font-size: 1.2rem !important; }
+
+        .stButton>button {
+            padding: 10px 14px !important;
+            font-size: 0.9rem !important;
+        }
+    }
+
+    @media screen and (max-width: 480px) {
+        .stChatInputContainer {
+            width: 94% !important;
+            bottom: 10px !important;
+        }
+    }
+
+    /* Input focus - white */
+    input:focus, textarea:focus, select:focus,
+    .stChatInputContainer textarea:focus,
+    [data-testid="stChatInputTextArea"]:focus {
+        border-color: #ffffff !important;
+        -webkit-box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3) !important;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3) !important;
+        outline: none !important;
+    }
+
+    /* iOS zoom fix */
+    input, textarea, select {
+        font-size: 16px !important;
+    }
+
+    /* Buttons - white text, purple border */
+    .stButton>button {
+        background-color: transparent !important;
+        color: #d0d0d0 !important;
+        border: 1px solid #b388b3 !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        -webkit-transition: all 0.3s ease;
+        transition: all 0.3s ease;
+        padding: 8px 16px !important;
+        min-height: 40px;
+    }
+
+    .stButton>button:hover, .stButton>button:active {
+        background-color: #b388b3 !important;
+        color: #212121 !important;
+        -webkit-box-shadow: 0 0 10px #b388b3;
+        box-shadow: 0 0 10px #b388b3;
+    }
+
+    /* Header - yellow */
+    h2, h3 { color: #FDFD96 !important; font-weight: 700 !important; }
+
+    /* Messages - Paper Style (No box, no border) */
+    [data-testid="stChatMessage"] {
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        margin-bottom: 15px !important;
+        padding: 10px 0px !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+
+    [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {
+        font-size: 1.1rem !important;
+        line-height: 1.6 !important;
+        font-family: 'Inter', -apple-system, sans-serif !important;
+        color: #e0e0e0 !important;
+    }
+    
+    /* Monochromatic Icons - Make avatars white/grayscale */
+    [data-testid="stChatMessageAvatar"] {
+        filter: grayscale(100%) brightness(200%);
+    }
+
+    /* Model selector - yellow label */
+    .stSelectbox label { color: #FDFD96 !important; }
+
+    /* Hide Streamlit UI */
+    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], #MainMenu, [data-testid="stToolbar"], [data-testid="stTopLevelActions"], [data-testid="collapsedControl"] {
+        visibility: hidden !important;
+        display: none !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+
+    /* Full screen - remove all margins and padding */
+    html, body {
+        height: 100vh !important;
+        width: 100vw !important;
+        overflow: hidden !important;
+    }
+
+    .main {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100vh !important;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        padding: 0 !important;
+        margin: 0 !important;
+        height: 100vh !important;
+    }
+
+    [data-testid="stAppViewBlockContainer"] {
+        padding: 0 !important;
+        margin: 0 !important;
+        height: 100vh !important;
+    }
+
+    .block-container {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+
+    /* Padding za content */
+    .main .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 200px !important;
+    }
+
+    /* Instapaper readable content - hidden from view but available to save services */
+    #instapaper-readable-content {
+        position: absolute;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+    }
+
+    /* Make content visible when printing or when Instapaper saves */
+    @media print {
+        #instapaper-readable-content {
+            position: static;
+            left: auto;
+            top: auto;
+            width: 100%;
+            height: auto;
+            overflow: visible;
+            display: block;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Funkcija za modele sa keširanjem
+@st.cache_data(ttl=300)  # Kešira podatke 5 minuta
+def get_models():
+    try:
+        response = ollama.list()
+        if hasattr(response, 'models'): return [m.model for m in response.models]
+        elif isinstance(response, dict) and 'models' in response: return [m['name'] for m in response['models']]
+        return []
+    except: return []
+
+def get_model_avatar(model_name):
+    """Vraća specifičan emoji na osnovu imena modela"""
+    if not model_name: return "🤖"
+    
+    name = model_name.lower()
+    
+    # 1. Specifična mapiranja po porodicama modela
+    if "llama" in name: return "🦙"      # Llama
+    if "mistral" in name: return "🌪️"    # Mistral (Storm)
+    if "mixtral" in name: return "🌀"    # Mixtral
+    if "gemma" in name: return "💎"      # Gemma (Gem)
+    if "qwen" in name: return "🐉"       # Qwen (Dragon)
+    if "deepseek" in name: return "🐳"   # DeepSeek (Whale/Deep sea)
+    if "phi" in name: return "🔮"        # Phi (Golden Ratio/Physics)
+    if "vicuna" in name: return "🐪"     # Vicuna
+    if "wizard" in name: return "🧙‍♂️"    # Wizard
+    if "codellama" in name: return "👾"  # Code Llama
+    if "dolphin" in name: return "🐬"    # Dolphin
+    if "orca" in name: return "🐋"       # Orca
+    if "zephyr" in name: return "🌬️"     # Zephyr (Wind)
+    if "falcon" in name: return "🦅"     # Falcon
+    if "starling" in name: return "🐦"   # Starling
+    if "solar" in name: return "☀️"      # Solar
+    if "command" in name: return "⌘"     # Command R
+    if "hermes" in name: return "⚚"      # Hermes
+    if "aya" in name: return "🌺"        # Aya
+    if "yi" in name: return "🏔️"         # Yi (Mountain range implies tough)
+    if "claude" in name: return "🎭"     # Claude (Anthropic)
+    if "gpt" in name: return "🤖"        # GPT generic
+
+    # 2. Bazen raznolikih avatara za ostale modele (deterministički izbor)
+    # Koristimo hash imena da bi isti model uvek dobio isti avatar
+    pool = [
+        "👾", "👽", "👻", "👺", "👹", "💀", "🤡", "🦾", "👁️", "🧘", 
+        "🕵️", "🧞", "🧟", "🧛", "🦉", "🐙", "🍄", "🎲", "🧩", "🎹",
+        "🎯", "🎰", "🎱", "💿", "💾", "📡", "🛸", "🦠", "🧬", "🧪"
+    ]
+    
+    hash_val = sum(ord(c) for c in name)
+    return pool[hash_val % len(pool)]
+
+# Optimizovano pozivanje modela sa timeoutom
+def chat_with_model(model, messages, placeholder=None):
+    start_time = time.time()
+    full_response = ""
+
+    # Kreiraj jedinstveni ključ za keširanje na osnovu modela i poruka
+    cache_key = json.dumps([model, messages], sort_keys=True, default=str)
+
+    # Proveri da li već postoji keširani odgovor za ovaj upit
+    if "response_cache" not in st.session_state:
+        st.session_state.response_cache = {}
+
+    if cache_key in st.session_state.response_cache:
+        cached_response = st.session_state.response_cache[cache_key]
+        duration = time.time() - start_time
+        st.caption(f"Response from cache in {duration:.1f}s")
+        if placeholder: placeholder.markdown(cached_response)
+        return cached_response
+
+    try:
+        with st.spinner(f"Generating response using {model}..."):
+            stream = ollama.chat(model=model, messages=messages, stream=True, options={
+                'num_ctx': 4096,
+                'temperature': 0.7
+            })
+
+            for chunk in stream:
+                content = chunk['message']['content']
+                full_response += content
+
+                # Ažuriraj placeholder uživo ako postoji
+                if placeholder:
+                    placeholder.markdown(full_response + "▌")
+
+                # Dodaj malo delay da bi stream bio glatkiji
+                if len(full_response) % 100 == 0:
+                    time.sleep(0.01)
+            
+            # Ukloni kursor na kraju
+            if placeholder:
+                placeholder.markdown(full_response)
+
+        duration = time.time() - start_time
+        st.caption(f"Response generated in {duration:.1f}s")
+
+        # Proveri da li je odgovor neizrazit ili da li model izgleda nesigurno
+        # Ako odgovor sadrži fraze koje ukazuju na nesigurnost, pokušaj sa web pretragom
+        uncertainty_indicators = [
+            "nemam dovoljno informacija",
+            "nije mi poznato",
+            "ne mogu da potvrdim",
+            "ne znam tačno",
+            "nije mi poznat",
+            "ne mogu da pronađem",
+            "nemam informaciju",
+            "nije dostupno",
+            "nije poznato",
+            "nemam podatak"
+        ]
+
+        is_uncertain = any(indicator in full_response.lower() for indicator in uncertainty_indicators)
+
+        if is_uncertain:
+            # Ekstraktuj ključne reči iz korisničkog upita za pretragu
+            user_query = messages[-1]['content'] if messages else ""
+            if user_query:
+                st.info("Model nije siguran u odgovor. Pokrećem web pretragu za dodatne informacije...")
+                search_results = web_search(user_query, num_results=3)
+
+                if search_results and "error" not in search_results[0]:
+                    # Dodaj rezultate pretrage u poruku i ponovo pozovi model
+                    search_context = "Pronađene informacije iz web pretrage:\n"
+                    for i, result in enumerate(search_results):
+                        search_context += f"{i+1}. {result['title']}: {result['snippet']}\n"
+
+                    # Dodaj kontekst iz pretrage u poruku za model
+                    enhanced_messages = messages + [{"role": "user", "content": f"{user_query}\n\nKontekst iz web pretrage:\n{search_context}"}]
+
+                    with st.spinner("Ponovno generišem odgovor sa dodatnim informacijama..."):
+                        enhanced_stream = ollama.chat(model=model, messages=enhanced_messages, stream=True, options={
+                            'num_ctx': 4096,
+                            'temperature': 0.7
+                        })
+
+                        full_response = ""
+                        for chunk in enhanced_stream:
+                            content = chunk['message']['content']
+                            full_response += content
+
+                            # Dodaj malo delay da bi stream bio glatkiji
+                            if len(full_response) % 100 == 0:
+                                time.sleep(0.01)
+
+                        duration = time.time() - start_time
+                        st.caption(f"Enhanced response generated in {duration:.1f}s")
+
+        # Sačuvaj odgovor u keš
+        st.session_state.response_cache[cache_key] = full_response
+        return full_response
+
+    except Exception as e:
+        error_msg = str(e)
+        if "timeout" in error_msg.lower():
+            st.error("Timeout: Model took too long to respond. Try a smaller model or check your connection.")
+        else:
+            st.error(f"Error: {error_msg}")
+        return None
+
+# Putanja za perzistentno cuvanje
+SETTINGS_FILE = "/home/peterofovik/my-chat/.settings.json"
+SESSIONS_DIR = "/home/peterofovik/my-chat/sessions"
+
+def load_settings():
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return {"system_prompt": "", "last_model": "", "file_content": ""}
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f)
+    except:
+        pass
+
+# Funkcije za upravljanje sesijama (Chat History)
+def save_session(messages, filename=None):
+    if not messages: return None
+    
+    if not filename:
+        # Generiši ime na osnovu prve poruke ili datuma
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        first_msg = next((m['content'] for m in messages if m['role'] == 'user'), "New Chat")
+        safe_title = "".join([c if c.isalnum() else "_" for c in first_msg[:30]]).strip("_")
+        filename = f"{timestamp}__{safe_title}.json"
+    
+    filepath = os.path.join(SESSIONS_DIR, filename)
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(messages, f, indent=2)
+        return filename
+    except Exception as e:
+        return None
+
+def load_session(filename):
+    filepath = os.path.join(SESSIONS_DIR, filename)
+    try:
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    except:
+        return []
+
+def get_session_list():
+    sessions = []
+    if os.path.exists(SESSIONS_DIR):
+        files = sorted(os.listdir(SESSIONS_DIR), reverse=True)
+        for f in files:
+            if f.endswith(".json"):
+                sessions.append(f)
+    return sessions
+
+def delete_session(filename):
+    filepath = os.path.join(SESSIONS_DIR, filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+def export_chat_to_epub(messages, filename):
+    """Export chat to EPUB format"""
+    try:
+        import ebooklib
+        from ebooklib import epub
+
+        book = epub.EpubBook()
+
+        book.set_identifier(filename.replace('.epub', ''))
+        book.set_title('OLLAMA.CORE Chat')
+        book.set_language('en')
+
+        style = '''
+        @namespace epub "http://www.idpf.org/2007/ops";
+        body { font-family: serif; }
+        p { margin: 0.5em 0; text-align: justify; }
+        h1 { text-align: center; margin: 1em 0; }
+        h2 { color: #333; margin: 1em 0 0.5em 0; }
+        .user { background-color: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .assistant { background-color: #e8f4f8; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .model { color: #666; font-size: 0.9em; font-style: italic; }
+        .separator { border-top: 1px solid #ccc; margin: 20px 0; }
+        '''
+        nav_css = epub.EpubItem(
+            uid="style_nav",
+            file_name="style/nav.css",
+            media_type="text/css",
+            content=style
+        )
+        book.add_item(nav_css)
+
+        chapters = []
+
+        for i, msg in enumerate(messages):
+            if msg["role"] == "system":
+                continue
+
+            content = msg['content'].replace('\n', '<br/>')
+            model = msg.get('model_name', '')
+            role = msg["role"].upper()
+
+            if msg["role"] == "user":
+                html_content = f'''
+                <h2>[{role}]</h2>
+                <div class="user">{content}</div>
+                '''
+            else:
+                html_content = f'''
+                <h2>[{role}]</h2>
+                <div class="model">Model: {model}</div>
+                <div class="assistant">{content}</div>
+                '''
+
+            chapter = epub.EpubHtml(
+                title=f'{role} {i+1}',
+                file_name=f'chap_{i+1}.xhtml',
+                lang='en'
+            )
+            chapter.content = html_content
+            chapter.add_item(nav_css)
+            book.add_item(chapter)
+            chapters.append(chapter)
+
+        book.toc = chapters
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+
+        epub.write_epub(filename, book, {})
+        return True
+    except Exception as e:
+        return False
+
+def export_chat_to_pdf(messages, filename):
+    """Export chat to PDF format"""
+    try:
+        from fpdf import FPDF
+        from io import BytesIO
+
+        class PDF(FPDF):
+            def header(self):
+                self.set_font('Arial', 'B', 12)
+                self.cell(0, 10, 'OLLAMA.CORE Chat', 0, 1, 'C')
+                self.ln(5)
+
+            def footer(self):
+                self.set_y(-15)
+                self.set_font('Arial', 'I', 8)
+                self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+        pdf = PDF()
+        pdf.add_page()
+        pdf.set_font('Arial', '', 11)
+
+        for msg in messages:
+            if msg["role"] == "system":
+                continue
+
+            role = msg["role"].upper()
+            model = msg.get('model_name', '')
+            content = msg['content']
+
+            if msg["role"] == "user":
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(0, 8, f"[{role}]", 0, 1)
+                pdf.set_font('Arial', '', 11)
+            else:
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(0, 8, f"[{role}]", 0, 1)
+                pdf.set_font('Arial', 'I', 9)
+                pdf.cell(0, 6, f"Model: {model}", 0, 1)
+                pdf.set_font('Arial', '', 11)
+
+            lines = content.split('\n')
+            for line in lines:
+                pdf.multi_cell(0, 6, line)
+
+            pdf.ln(5)
+
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+
+        pdf.output(filename)
+        return True
+    except Exception as e:
+        return False
+
+# Ucitaj sacuvane postavke
+saved_settings = load_settings()
+
+# Inicijalizacija sesije
+for key in ["authenticated", "messages", "system_prompt", "file_content", "show_system", "show_files", "last_model", "response_cache", "show_agents", "show_dialogue", "show_history", "current_session_file"]:
+    if key not in st.session_state:
+        if key == "authenticated":
+            st.session_state[key] = False
+        elif key in ["show_system", "show_files", "show_agents", "show_dialogue", "show_history"]:
+            st.session_state[key] = False
+        elif key == "messages":
+            st.session_state[key] = []
+        elif key == "system_prompt":
+            st.session_state[key] = saved_settings.get("system_prompt", "")
+        elif key == "file_content":
+            st.session_state[key] = saved_settings.get("file_content", "")
+        elif key == "last_model":
+            st.session_state[key] = saved_settings.get("last_model", "")
+        elif key == "response_cache":
+            st.session_state[key] = {}
+        else:
+            st.session_state[key] = ""
+
+# --- LOGIN ---
+if not st.session_state.authenticated:
+    st.markdown("<br><br><br><h1 style='text-align: center; color: #cc8e5e;'>OLLAMA.CORE</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1,2,1])
+    with c2:
+        pin = st.text_input("Unesi PIN (6 cifara):", type="password")
+        if pin == "2020":
+            st.session_state.authenticated = True
+            st.rerun()
+    st.stop()
+
+# Funkcije za agente
+def web_search(query, num_results=3):
+    """Osnovna funkcija za web pretragu koristeći Brave Search API ako je dostupan"""
+    try:
+        # Proveri da li postoji Brave API ključ u okruženju
+        brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+
+        if brave_api_key:
+            # Koristi Brave Search API
+            headers = {
+                "X-Subscription-Token": brave_api_key,
+                "Accept": "application/json"
+            }
+
+            params = {
+                "q": query,
+                "count": num_results,
+                "freshness": "pd"  # za pretragu samo od juče i danas
+            }
+
+            response = requests.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                headers=headers,
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                results = []
+
+                for item in data.get("web", {}).get("results", [])[:num_results]:
+                    results.append({
+                        "title": item.get("title", "Bez naslova"),
+                        "link": item.get("url", ""),
+                        "snippet": item.get("description", "Bez opisa")
+                    })
+
+                return results
+            else:
+                # Ako Brave API ne uspe, koristi fallback metodu
+                return web_search_fallback(query, num_results)
+        else:
+            # Ako nema Brave API ključa, koristi fallback metodu
+            return web_search_fallback(query, num_results)
+
+    except Exception as e:
+        # Ako sve ostalo ne uspe, koristi fallback metodu
+        return web_search_fallback(query, num_results)
+
+def web_search_fallback(query, num_results=3):
+    """Fallback metoda za web pretragu koristeći web scraping"""
+    try:
+        # Koristi Google Custom Search API ako je dostupan, ili koristi drugi pristup
+        # Ovde implementiramo osnovnu verziju sa requests i BeautifulSoup
+        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
+        response = requests.get(search_url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        results = []
+        for g in soup.find_all('div', class_='g')[:num_results]:
+            anchor = g.find('a')
+            if anchor:
+                link = anchor.get('href')
+                title_elem = g.find('h3')
+                title = title_elem.text if title_elem else "Bez naslova"
+                snippet_elem = g.find('span', class_='st')
+                snippet = snippet_elem.text if snippet_elem else "Bez opisa"
+
+                results.append({
+                    "title": title,
+                    "link": link,
+                    "snippet": snippet
+                })
+
+        return results
+    except Exception as e:
+        return [{"error": str(e)}]
+
+def web_scrape(url):
+    """Osnovna funkcija za web skrejp"""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Ukloni skripte i stilove
+        for script in soup(["script", "style"]):
+            script.decompose()
+
+        text = soup.get_text()
+        # Očisti tekst
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = ' '.join(chunk for chunk in chunks if chunk)
+
+        return text
+    except Exception as e:
+        return f"Greška prilikom skrejpa: {str(e)}"
+
+def analyze_document(uploaded_file):
+    """Osnovna funkcija za analizu dokumenata"""
+    try:
+        content = ""
+        if uploaded_file.type == "application/pdf":
+            reader = PdfReader(uploaded_file)
+            for page in reader.pages:
+                content += page.extract_text() + "\n"
+        elif uploaded_file.name.endswith(".epub"):
+            import ebooklib
+            from ebooklib import epub
+            # Sačuvaj privremeno jer ebooklib radi sa putanjama
+            with open("temp.epub", "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            book = epub.read_epub("temp.epub")
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Očisti HTML tagove
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+                    content += soup.get_text() + "\n"
+            
+            os.remove("temp.epub")
+        elif uploaded_file.type == "text/plain":
+            content = uploaded_file.read().decode("utf-8")
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            import docx
+            # Potrebno je instalirati python-docx: pip install python-docx
+            # Za sada vraćamo poruku o podršci za Word fajlove
+            return "Podrška za Word dokumente zahteva dodatnu biblioteku: python-docx"
+        else:
+            content = uploaded_file.read().decode("utf-8")
+
+        # Vraćamo samo početak dokumenta za prikaz (limit na reči)
+        words = content.split()
+        if len(words) > 60000:
+            content = " ".join(words[:60000]) + "\n\n[...DOKUMENT JE SKRAĆEN (limit 60.000 reči)...]"
+
+        return content
+    except Exception as e:
+        return f"Greška prilikom analize dokumenta: {str(e)}"
+
+def code_helper(code, task="analyze"):
+    """Osnovna funkcija za pomoć sa kodom"""
+    try:
+        if task == "analyze":
+            # Analizira kod i daje preporuke
+            lines = code.split('\n')
+            info = {
+                "total_lines": len(lines),
+                "non_empty_lines": len([l for l in lines if l.strip()]),
+                "comments": len([l for l in lines if l.strip().startswith('#') or l.strip().startswith('//') or '/*' in l or '*/' in l or l.strip().startswith('*')]),
+                "functions": len([l for l in lines if 'def ' in l or 'function ' in l or 'func ' in l])
+            }
+            return f"Analiza koda:\n- Ukupno linija: {info['total_lines']}\n- Linija sa sadržajem: {info['non_empty_lines']}\n- Komentara: {info['comments']}\n- Funkcija: {info['functions']}"
+        elif task == "debug":
+            # Osnovna analiza za greške u kodu
+            lines = code.split('\n')
+            errors = []
+            for i, line in enumerate(lines, 1):
+                if line.count('(') != line.count(')'):
+                    errors.append(f"Red {i}: Neuparena zagrada")
+                if line.count('[') != line.count(']'):
+                    errors.append(f"Red {i}: Neuparena uglasta zagrada")
+                if line.count('{') != line.count('}'):
+                    errors.append(f"Red {i}: Neuparena vitičasta zagrada")
+            if errors:
+                return "Pronađene greške:\n" + "\n".join(errors)
+            else:
+                return "Nema očiglednih sintaksnih grešaka"
+        elif task == "explain":
+            # Ovde bi se koristio model za objašnjenje koda
+            return "Kod objašnjenje: Ova funkcija bi koristila AI model da objasni funkcionalnost koda."
+        else:
+            return "Nepoznat tip zadatka. Dostupni: analyze, debug, explain"
+    except Exception as e:
+        return f"Greška prilikom obrade koda: {str(e)}"
+
+def get_news_from_rss(rss_url, num_articles=5):
+    """Osnovna funkcija za dohvatanje vesti iz RSS feeda"""
+    try:
+        import feedparser
+        feed = feedparser.parse(rss_url)
+
+        articles = []
+        for entry in feed.entries[:num_articles]:
+            article = {
+                "title": entry.title,
+                "summary": entry.summary if hasattr(entry, 'summary') else "Nema sažetka",
+                "link": entry.link,
+                "published": entry.published if hasattr(entry, 'published') else "Datum nije dostupan"
+            }
+            articles.append(article)
+
+        return articles
+    except ImportError:
+        return [{"error": "Biblioteka 'feedparser' nije instalirana. Pokrenite: pip install feedparser"}]
+    except Exception as e:
+        return [{"error": f"Greška prilikom dohvatanja vesti: {str(e)}"}]
+
+def get_top_news():
+    """Funkcija za dohvatanje najnovijih vesti sa popularnih izvora"""
+    # Definišemo nekoliko popularnih RSS feedova
+    rss_feeds = {
+        "BBC News": "http://feeds.bbci.co.uk/news/rss.xml",
+        "TechCrunch": "https://techcrunch.com/feed/",
+        "Reuters": "http://feeds.reuters.com/reuters/topNews",
+        "Ars Technica": "http://feeds.arstechnica.com/arstechnica/index"
+    }
+
+    all_articles = {}
+    for source, url in rss_feeds.items():
+        try:
+            import feedparser
+            feed = feedparser.parse(url)
+            articles = []
+            for entry in feed.entries[:3]:  # Uzimamo po 3 najnovije vesti sa svakog izvora
+                article = {
+                    "title": entry.title,
+                    "summary": entry.summary if hasattr(entry, 'summary') else "Nema sažetka",
+                    "link": entry.link,
+                    "published": entry.published if hasattr(entry, 'published') else "Datum nije dostupan"
+                }
+                articles.append(article)
+            all_articles[source] = articles
+        except:
+            all_articles[source] = [{"error": f"Greška prilikom dohvatanja vesti iz {source}"}]
+
+    return all_articles
+
+def api_caller(url, method="GET", headers=None, data=None, params=None):
+    """Osnovna funkcija za API pozive"""
+    try:
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, params=params)
+        elif method.upper() == "POST":
+            response = requests.post(url, headers=headers, json=data, params=params)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, json=data, params=params)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, headers=headers, params=params)
+        else:
+            return f"Nepodržan metod: {method}"
+
+        # Proveravamo status kod
+        if response.status_code in [200, 201, 202]:
+            try:
+                # Pokušavamo da vratimo JSON ako je odgovor u tom formatu
+                return response.json()
+            except:
+                # Ako nije JSON, vratimo tekstualni odgovor
+                return response.text
+        else:
+            return f"Greška u API pozivu: {response.status_code} - {response.text}"
+
+    except requests.exceptions.ConnectionError:
+        return "Greška: Nije moguće povezivanje sa API-jem"
+    except requests.exceptions.Timeout:
+        return "Greška: Vreme za odgovor API-ja je isteklo"
+    except requests.exceptions.RequestException as e:
+        return f"Greška u API pozivu: {str(e)}"
+    except Exception as e:
+        return f"Greška: {str(e)}"
+
+def run_dialogue(model1, model2, initial_prompt, max_rounds=5):
+    """Funkcija za dijalog između dva modela"""
+    try:
+        # Početna poruka
+        messages = [{"role": "user", "content": initial_prompt}]
+        dialogue_history = []
+
+        for i in range(max_rounds):
+            # Prvi model odgovara
+            response1 = ollama.chat(model=model1, messages=messages, options={'num_ctx': 4096, 'temperature': 0.7})
+            response1_text = response1['message']['content']
+
+            dialogue_history.append({"model": model1, "response": response1_text})
+
+            # Dodajemo odgovor prvog modela u istoriju poruka
+            messages.append({"role": "assistant", "content": response1_text})
+
+            # Drugi model odgovara na osnovu prethodne diskusije
+            response2 = ollama.chat(model=model2, messages=messages, options={'num_ctx': 4096, 'temperature': 0.7})
+            response2_text = response2['message']['content']
+
+            dialogue_history.append({"model": model2, "response": response2_text})
+
+            # Dodajemo odgovor drugog modela u istoriju poruka
+            messages.append({"role": "assistant", "content": response2_text})
+
+        return dialogue_history
+
+    except Exception as e:
+        return [{"error": f"Greška u dijalogu: {str(e)}"}]
+
+# MBTI Ličnosti i njihovi sistemski promptovi
+MBTI_PERSONAS = {
+    "INTJ - Arhitekta": "Ti si INTJ (Arhitekta). Tvoj stil je analitičan, strateški i rezervisan. Fokusiraš se na logiku, sisteme i dugoročne posledice. Često si kritičan i tražiš efikasnost. Ne voliš ćaskanje, odmah prelaziš na suštinu. Koristiš precizan jezik.",
+    "INTP - Logičar": "Ti si INTP (Logičar). Tvoj stil je apstraktan, radoznao i objektivan. Voliš teorije i pronalaženje logičkih nedoslednosti. Često preispituješ premise. Možeš delovati rasejano ili previše fokusirano na tehničke detalje.",
+    "ENTJ - Komandant": "Ti si ENTJ (Komandant). Tvoj stil je odlučan, direktan i ambiciozan. Voliš da preuzimaš vođstvo i organizuješ stvari. Fokusiran si na rezultate i efikasnost. Ponekad možeš delovati oštro ili nestrpljivo.",
+    "ENTP - Debatnik": "Ti si ENTP (Debatnik). Tvoj stil je provokativan, inovativan i energičan. Voliš intelektualne izazove i igranje đavoljeg advokata. Često skačeš s ideje na ideju. Voliš da testiraš granice argumenata.",
+    "INFJ - Zastupnik": "Ti si INFJ (Zastupnik). Tvoj stil je dubok, empatičan i idealistički. Fokusiraš se na ljudske vrednosti i skrivena značenja. Govoriš mirno ali sa strašću za svoja uverenja. Često koristiš metafore.",
+    "INFP - Posrednik": "Ti si INFP (Posrednik). Tvoj stil je poetičan, ljubazan i vođen vrednostima. Težiš harmoniji i autentičnosti. Često si sanjar i idealista. Osetljiv si na emocionalne nijanse.",
+    "ENFJ - Protagonista": "Ti si ENFJ (Protagonista). Tvoj stil je harizmatičan, inspirativan i fokusiran na ljude. Voliš da pomažeš drugima da ostvare potencijal. Prirodni si vođa koji teži konsenzusu i harmoniji.",
+    "ENFP - Aktivista": "Ti si ENFP (Aktivista). Tvoj stil je entuzijastičan, kreativan i društven. Vidiš mogućnosti svuda. Tvoj govor je pun energije i emocija. Voliš spontanost i nove ideje.",
+    "ISTJ - Logističar": "Ti si ISTJ (Logističar). Tvoj stil je praktičan, faktički i odgovoran. Ceniš tradiciju, red i pouzdanost. Govoriš jasno i konkretno. Fokusiraš se na detalje i dokazane metode.",
+    "ISFJ - Branilac": "Ti si ISFJ (Branilac). Tvoj stil je posvećen, topao i savestan. Veoma si pažljiv prema potrebama drugih. Ceniš stabilnost i harmoniju. Tvoj govor je skroman i pun podrške.",
+    "ESTJ - Izvršilac": "Ti si ESTJ (Izvršilac). Tvoj stil je direktan, organizovan i poštuje pravila. Voliš red i jasnu strukturu. Fokusiran si na činjenice i konkretne rezultate. Ceniš naporan rad.",
+    "ESFJ - Konzul": "Ti si ESFJ (Konzul). Tvoj stil je brižan, društven i lojalan. Voliš da se povezuješ s ljudima i održavaš društveni red. Veoma si praktičan u pomaganju drugima.",
+    "ISTP - Virtuoso": "Ti si ISTP (Virtuoso). Tvoj stil je logičan, prilagodljiv i fokusiran na akciju. Voliš da rastavljaš stvari i razumeš kako rade. Govoriš malo, ali konkretno. Ceniš efikasnost i slobodu.",
+    "ISFP - Avanturista": "Ti si ISFP (Avanturista). Tvoj stil je umetnički, osetljiv i spontan. Živiš u trenutku. Ne voliš konflikte i apstraktne teorije. Izražavaš se kroz dela ili estetiku pre nego kroz reči.",
+    "ESTP - Preduzetnik": "Ti si ESTP (Preduzetnik). Tvoj stil je energičan, pronicljiv i fokusiran na akciju. Voliš rizik i brzo rešavanje problema. Dosadno ti je apstraktno teoretisanje. Voliš da 'gasiš požare'.",
+    "ESFP - Zabavljač": "Ti si ESFP (Zabavljač). Tvoj stil je spontan, energičan i zabavan. Voliš da budeš u centru pažnje. Fokusiran si na 'ovde i sada'. Veoma si praktičan i društven."
+}
+
+def save_dialogue_to_file(history, topic):
+    """Čuva dijalog u fajl"""
+    try:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"dialogue_{timestamp}.txt"
+        # Putanja ka bookcreator folderu ili home folderu
+        save_path = os.path.expanduser(f"~/bookcreator/{filename}")
+        
+        # Ako bookcreator ne postoji, probaj home
+        if not os.path.exists(os.path.dirname(save_path)):
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(f"TEMA: {topic}\n")
+            f.write(f"DATUM: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("="*50 + "\n\n")
+            
+            for msg in history:
+                role = msg.get("role", "unknown")
+                model = msg.get("model_name", "Unknown")
+                content = msg.get("content", "")
+                f.write(f"[{role} - {model}]:\n{content}\n\n")
+                f.write("-" * 30 + "\n\n")
+                
+        return save_path
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def export_chat_to_text(messages):
+    """Export chat to plain text format"""
+    text = "=" * 60 + "\n"
+    text += f"OLLAMA.CORE - Chat Export\n"
+    text += f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    text += f"Total messages: {len([m for m in messages if m['role'] != 'system'])}\n"
+    text += "=" * 60 + "\n\n"
+    
+    for msg in messages:
+        if msg["role"] == "system":
+            continue
+        
+        role = msg["role"].upper()
+        model = msg.get("model_name", "")
+        
+        if msg["role"] == "user":
+            text += f"[{role}]\n"
+        else:
+            text += f"[{role} - {model}]\n"
+        
+        text += f"{msg['content']}\n"
+        text += "-" * 40 + "\n\n"
+    
+    return text
+
+# --- HEADER TOOLBAR ---
+t_col1, t_col2, t_col3, t_col4, t_col5, t_col6, t_col7, t_col8 = st.columns([1.5, 0.8, 0.8, 0.8, 0.8, 0.8, 1.2, 0.8])
+
+with t_col1:
+    st.markdown("<h2 style='margin: 0;'>OLLAMA.CORE</h2>", unsafe_allow_html=True)
+
+with t_col2:
+    if st.button("➕ CLEAR"):
+        st.session_state.messages = []
+        st.session_state.file_content = ""
+        st.session_state.response_cache = {}
+        st.session_state.current_session_file = None # Resetuj trenutnu sesiju
+        st.rerun()
+
+with t_col3:
+    if st.button("⚙️ SYSTEM"):
+        st.session_state.show_system = not st.session_state.show_system
+
+with t_col4:
+    if st.button("💾 HISTORY"):
+        st.session_state.show_history = not st.session_state.get("show_history", False)
+
+with t_col5:
+    if st.button("🤖 AGENTS"):
+        st.session_state.show_agents = not st.session_state.get("show_agents", False)
+
+with t_col6:
+    if st.button("💬 DIALOG"):
+        st.session_state.show_dialogue = not st.session_state.get("show_dialogue", False)
+
+with t_col7:
+    model_names = get_models()
+    default_index = 0
+    if st.session_state.last_model and st.session_state.last_model in model_names:
+        default_index = model_names.index(st.session_state.last_model)
+
+    selected_model = st.selectbox("", model_names, index=default_index if model_names else None, label_visibility="collapsed")
+
+    if selected_model and selected_model != st.session_state.last_model:
+        st.session_state.last_model = selected_model
+        save_settings({
+            "system_prompt": st.session_state.system_prompt,
+            "last_model": selected_model,
+            "file_content": st.session_state.file_content
+        })
+
+with t_col8:
+    if st.button("📋 EXPORT"):
+        if st.session_state.messages:
+            st.write("**Export Chat**")
+
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                chat_text = export_chat_to_text(st.session_state.messages)
+                filename_txt = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+                st.download_button(
+                    label="📄 TXT",
+                    data=chat_text,
+                    file_name=filename_txt,
+                    mime="text/plain",
+                    key="download_txt",
+                    use_container_width=True
+                )
+
+            with c2:
+                filename_epub = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.epub"
+                epub_data = BytesIO()
+                if export_chat_to_epub(st.session_state.messages, filename_epub):
+                    with open(filename_epub, 'rb') as f:
+                        st.download_button(
+                            label="📚 EPUB",
+                            data=f.read(),
+                            file_name=filename_epub,
+                            mime="application/epub+zip",
+                            key="download_epub",
+                            use_container_width=True
+                        )
+                else:
+                    st.error("EPUB error")
+
+            with c3:
+                filename_pdf = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.pdf"
+                if export_chat_to_pdf(st.session_state.messages, filename_pdf):
+                    with open(filename_pdf, 'rb') as f:
+                        st.download_button(
+                            label="📕 PDF",
+                            data=f.read(),
+                            file_name=filename_pdf,
+                            mime="application/pdf",
+                            key="download_pdf",
+                            use_container_width=True
+                        )
+                else:
+                    st.error("PDF error")
+        else:
+            st.warning("No messages to export")
+
+    # Sacuvaj izabrani model
+    if selected_model and selected_model != st.session_state.last_model:
+        st.session_state.last_model = selected_model
+        save_settings({
+            "system_prompt": st.session_state.system_prompt,
+            "last_model": selected_model,
+            "file_content": st.session_state.file_content
+        })
+
+# --- MODALNE SEKCIJE ---
+if st.session_state.show_system:
+    with st.container():
+        st.markdown("<div style='background-color: #333333; padding: 25px; border-radius: 12px; border: 1px solid #b388b3;'>", unsafe_allow_html=True)
+        new_prompt = st.text_area("SYSTEM INSTRUCTION:", value=st.session_state.system_prompt, height=150)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("SAVE & CLOSE"):
+                st.session_state.system_prompt = new_prompt
+                st.session_state.show_system = False
+                # Sacuvaj u fajl
+                save_settings({
+                    "system_prompt": new_prompt,
+                    "last_model": st.session_state.get("last_model", ""),
+                    "file_content": st.session_state.file_content
+                })
+                st.success("Saved!")
+                st.rerun()
+        with col2:
+            if st.button("CANCEL"):
+                st.session_state.show_system = False
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# --- HISTORY PANEL ---
+if st.session_state.get("show_history", False):
+    with st.container():
+        st.markdown("<div style='background-color: #333333; padding: 25px; border-radius: 12px; border: 1px solid #b388b3;'>", unsafe_allow_html=True)
+        st.markdown("### 💾 SAČUVANE SESIJE")
+        
+        # Opcija za čuvanje trenutne sesije
+        if st.session_state.messages:
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                new_session_name = st.text_input("Ime za novu sesiju (opciono):", placeholder="Ostavite prazno za automatsko ime")
+            with c2:
+                if st.button("SAČUVAJ TRENUTNU"):
+                    filename = new_session_name + ".json" if new_session_name else None
+                    saved_name = save_session(st.session_state.messages, filename)
+                    if saved_name:
+                        st.session_state.current_session_file = saved_name
+                        st.success(f"Sačuvano: {saved_name}")
+                        time.sleep(1)
+                        st.rerun()
+
+        st.divider()
+
+        # Lista sesija
+        sessions = get_session_list()
+        if not sessions:
+            st.info("Nema sačuvanih sesija.")
+        else:
+            for sess in sessions:
+                col_name, col_load, col_del = st.columns([4, 1, 1])
+                with col_name:
+                    st.write(f"📄 {sess}")
+                with col_load:
+                    if st.button("UČITAJ", key=f"load_{sess}"):
+                        loaded_msgs = load_session(sess)
+                        if loaded_msgs:
+                            st.session_state.messages = loaded_msgs
+                            st.session_state.current_session_file = sess
+                            st.session_state.show_history = False
+                            st.rerun()
+                with col_del:
+                    if st.button("🗑️", key=f"del_{sess}"):
+                        delete_session(sess)
+                        st.rerun()
+
+        if st.button("ZATVORI ISTORIJU"):
+            st.session_state.show_history = False
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+if st.button("📁 DOCS"):
+    st.session_state.show_files = not st.session_state.show_files
+
+if st.session_state.show_files:
+    with st.container():
+        st.markdown("<div style='background-color: #333333; padding: 25px; border-radius: 12px; border: 1px solid #FDFD96;'>", unsafe_allow_html=True)
+
+        # Prikazi ako vec ima uucitan sadrzaj
+        if st.session_state.file_content:
+            word_count = len(st.session_state.file_content.split())
+            st.info(f"Učitan dokument: {word_count} reči ({len(st.session_state.file_content)} karaktera)")
+            
+            # Dugme za kopiranje dokumenta
+            st.markdown(
+                f"""
+                <script>
+                function copyDocToClipboard(text) {{
+                    navigator.clipboard.writeText(text).then(function() {{
+                        console.log('Copied!');
+                    }}, function(err) {{
+                        console.error('Error:', err);
+                    }});
+                }}
+                </script>
+                <button 
+                    onclick="copyDocToClipboard(`{st.session_state.file_content[:10000].replace('`', '').replace('$', '')}...`)"
+                    style="
+                        background-color: transparent; 
+                        color: #FDFD96; 
+                        border: 1px solid #FDFD96; 
+                        padding: 8px 16px; 
+                        border-radius: 5px; 
+                        cursor: pointer; 
+                        margin-bottom: 15px;
+                        font-family: 'Inter', sans-serif;
+                    "
+                    onmouseover="this.style.backgroundColor='#FDFD96'; this.style.color='#212121'"
+                    onmouseout="this.style.backgroundColor='transparent'; this.style.color='#FDFD96'"
+                >
+                    📋 KOPIRAJ SADRŽAJ DOKUMENTA
+                </button>
+                """,
+                unsafe_allow_html=True
+            )
+
+            if st.button("CLEAR DOCUMENT"):
+                st.session_state.file_content = ""
+                st.session_state.response_cache = {}
+                save_settings({
+                    "system_prompt": st.session_state.system_prompt,
+                    "last_model": st.session_state.get("last_model", ""),
+                    "file_content": ""
+                })
+                st.rerun()
+
+        uploaded_file = st.file_uploader("UPLOAD (TXT, PDF, MD, EPUB):", type=['txt', 'pdf', 'md', 'epub'])
+        if uploaded_file:
+            content = ""
+            if uploaded_file.type == "application/pdf":
+                reader = PdfReader(uploaded_file)
+                for page in reader.pages: content += page.extract_text() + "\n"
+            else: content = uploaded_file.read().decode("utf-8")
+            st.session_state.file_content = content
+            # Sacuvaj
+            save_settings({
+                "system_prompt": st.session_state.system_prompt,
+                "last_model": st.session_state.get("last_model", ""),
+                "file_content": content
+            })
+            st.success("DATA LOADED & SAVED.")
+
+        # Dubinska Analiza
+        if st.session_state.file_content and st.button("🧠 DUBINSKA ANALIZA DOKUMENTA"):
+            if not selected_model:
+                st.error("Molim vas izaberite model prvo.")
+            else:
+                with st.spinner("Model analizira semantiku, semiotiku i strukturu..."):
+                    analysis_prompt = [
+                        {"role": "system", "content": "Ti si ekspert za književnu i strukturalnu analizu teksta. Tvoj zadatak je da dubinski analiziraš priloženi tekst."},
+                        {"role": "user", "content": f"Analiziraj sledeći tekst (prvih 50k karaktera). \n\nTEKST:\n{st.session_state.file_content[:50000]}\n\nZADATAK:\n1. Sažetak (Summary): O čemu se radi?\n2. Semiotika: Koji su ključni simboli i motivi?\n3. Semantika i Ton: Koje je dublje značenje i kakav je ton autora?\n4. Ključni koncepti: 5 najvažnijih ideja.\n\nAnalizu ispiši jasno i strukturirano."}
+                    ]
+                    analysis_result = chat_with_model(selected_model, analysis_prompt)
+                    
+                    if analysis_result:
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": f"🔍 **DUBINSKA ANALIZA DOKUMENTA:**\n\n{analysis_result}",
+                            "model_name": selected_model
+                        })
+                        st.rerun()
+
+        if st.button("CLOSE UPLOAD"):
+            st.session_state.show_files = False
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# --- AGENT PANEL ---
+if st.session_state.get("show_agents", False):
+    with st.container():
+        st.markdown("<div style='background-color: #333333; padding: 25px; border-radius: 12px; border: 1px solid #5c94e8;'>", unsafe_allow_html=True)
+
+        st.markdown("<h3 style='color: #5c94e8;'>🤖 AGENTI</h3>", unsafe_allow_html=True)
+
+        agent_option = st.selectbox("Izaberi agenta:", ["", "🔍 Web Pretraga", "🕷️ Web Skrejp", "📄 Dokumenti", "💻 Kod pomoćnik", "📰 Vesti", "🔌 API poziv"])
+
+        if agent_option == "🔍 Web Pretraga":
+            query = st.text_input("Unesi upit za pretragu:")
+            if st.button("Pokreni pretragu"):
+                if query:
+                    with st.spinner("Pretražujem web..."):
+                        results = web_search(query)
+                        if results and "error" not in results[0]:
+                            st.success(f"Pronađeno {len(results)} rezultata:")
+                            for i, result in enumerate(results):
+                                with st.expander(f"Rezultat {i+1}: {result['title']}"):
+                                    st.write(f"**Link:** {result['link']}")
+                                    st.write(f"**Opis:** {result['snippet']}")
+                        else:
+                            st.error(f"Greška u pretrazi: {results[0]['error'] if results else 'Nema rezultata'}")
+
+        elif agent_option == "🕷️ Web Skrejp":
+            url = st.text_input("Unesi URL za skrejpovanje:")
+            if st.button("Skrejpuj stranicu"):
+                if url:
+                    with st.spinner("Skrejpujem stranicu..."):
+                        content = web_scrape(url)
+                        if not content.startswith("Greška"):
+                            st.success("Stranica uspešno skrejpovana:")
+                            
+                            st.text_area("Sadržaj stranice:", content, height=200, key="scraped_content")
+                            
+                            # JavaScript Copy Button (Van tekstualnog polja, jasno vidljivo)
+                            st.markdown(
+                                f"""
+                                <script>
+                                function copyToClipboard(text) {{
+                                    navigator.clipboard.writeText(text).then(function() {{
+                                        console.log('Copied!');
+                                    }}, function(err) {{
+                                        console.error('Error:', err);
+                                    }});
+                                }}
+                                </script>
+                                <button 
+                                    onclick="copyToClipboard(`{content.replace('`', '').replace('$', '')}`)"
+                                    style="
+                                        background-color: transparent; 
+                                        color: #FDFD96; 
+                                        border: 1px solid #FDFD96; 
+                                        padding: 8px 16px; 
+                                        border-radius: 5px; 
+                                        cursor: pointer; 
+                                        margin-top: 10px;
+                                        font-family: 'Inter', sans-serif;
+                                    "
+                                    onmouseover="this.style.backgroundColor='#FDFD96'; this.style.color='#212121'"
+                                    onmouseout="this.style.backgroundColor='transparent'; this.style.color='#FDFD96'"
+                                >
+                                    📋 KOPIRAJ SADRŽAJ
+                                </button>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.error(content)
+
+        elif agent_option == "📄 Dokumenti":
+            st.markdown("**Obrada dokumenata**")
+            uploaded_doc = st.file_uploader("Otpremi dokument (PDF, TXT, EPUB):", type=['pdf', 'txt', 'docx', 'epub'])
+            if uploaded_doc:
+                with st.spinner("Analiziram dokument..."):
+                    content = analyze_document(uploaded_doc)
+                    st.success("Dokument uspešno analiziran:")
+                    with st.expander("Prikaži sadržaj dokumenta"):
+                        st.text_area("Sadržaj dokumenta:", content, height=300)
+
+        elif agent_option == "💻 Kod pomoćnik":
+            st.markdown("**Pomoć sa kodom**")
+            code_input = st.text_area("Unesi kod za analizu:", height=200)
+            task_option = st.selectbox("Izaberi zadatak:", ["analyze", "debug", "explain"])
+            if st.button("Procesuiraj kod"):
+                if code_input:
+                    with st.spinner("Analiziram kod..."):
+                        result = code_helper(code_input, task_option)
+                        st.text_area("Rezultat:", result, height=200)
+
+        elif agent_option == "📰 Vesti":
+            st.markdown("**Najnovije vesti**")
+            if st.button("Dohvati vesti"):
+                with st.spinner("Dohvatam vesti..."):
+                    news = get_top_news()
+                    for source, articles in news.items():
+                        with st.expander(f"**{source}**"):
+                            if not articles or ("error" in articles[0] if isinstance(articles[0], dict) and "error" in articles[0] else False):
+                                error_msg = articles[0]["error"] if articles and isinstance(articles[0], dict) and "error" in articles[0] else "Nema dostupnih vesti"
+                                st.error(error_msg)
+                            else:
+                                for i, article in enumerate(articles):
+                                    st.write(f"**{article['title']}**")
+                                    st.write(f"*{article['published']}*")
+                                    st.write(f"{article['summary'][:200]}...")
+                                    st.write(f"[Link]({article['link']})")
+                                    st.markdown("---")
+
+        elif agent_option == "🔌 API poziv":
+            st.markdown("**API poziv**")
+            api_url = st.text_input("Unesi URL API-ja:")
+            api_method = st.selectbox("Metod:", ["GET", "POST", "PUT", "DELETE"])
+            api_headers = st.text_area("Zaglavlja (JSON format):", placeholder='{"Content-Type": "application/json"}', height=100)
+            api_data = st.text_area("Podaci (za POST/PUT):", placeholder='{"kljuc": "vrednost"}', height=150)
+
+            if st.button("Pozovi API"):
+                if api_url:
+                    with st.spinner("Pozivam API..."):
+                        try:
+                            headers = json.loads(api_headers) if api_headers.strip() else None
+                            data = json.loads(api_data) if api_data.strip() else None
+                            result = api_caller(api_url, api_method, headers, data)
+                            if isinstance(result, dict) or isinstance(result, list): st.json(result)
+                            else: st.text_area("Odgovor:", result, height=300)
+                        except json.JSONDecodeError as e:
+                            st.error(f"Greška u parsiranju JSON-a: {str(e)}")
+
+        if st.button("Zatvori agente"):
+            st.session_state.show_agents = False
+            st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# --- DIALOG PANEL (DEBATA) ---
+if st.session_state.get("show_dialogue", False):
+    with st.container():
+        st.markdown("<div style='background-color: #333333; padding: 25px; border-radius: 12px; border: 1px solid #FDFD96;'>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #FDFD96;'>💬 AI DEBATA (16 Personalities)</h3>", unsafe_allow_html=True)
+
+        model_names = get_models()
+
+        # Inicijalizacija dijalog stanja
+        if "dialogue_history" not in st.session_state: st.session_state.dialogue_history = []
+        if "dialogue_active" not in st.session_state: st.session_state.dialogue_active = False
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### LEVI UGAO")
+            model1 = st.selectbox("Model 1:", model_names, key="m1_sel")
+            persona1 = st.selectbox("Ličnost 1:", list(MBTI_PERSONAS.keys()), key="p1_sel", index=0)
+            
+        with c2:
+            st.markdown("#### DESNI UGAO")
+            model2 = st.selectbox("Model 2:", model_names, key="m2_sel", index=1 if len(model_names)>1 else 0)
+            persona2 = st.selectbox("Ličnost 2:", list(MBTI_PERSONAS.keys()), key="p2_sel", index=3)
+
+        initial_prompt = st.text_area("Tema debate / Početni scenario:", height=100)
+
+        col_act1, col_act2, col_act3 = st.columns([1,1,1])
+        
+        with col_act1:
+            if st.button("🚀 POČNI DEBATU"):
+                st.session_state.dialogue_history = []
+                st.session_state.dialogue_active = True
+                
+                # Dodaj sistemske poruke za persone u istoriju (ali ih ne prikazuj)
+                sys_msg1 = {"role": "system", "content": MBTI_PERSONAS[persona1] + " Tvoj sagovornik ima drugu ličnost. Ostani u svom karakteru."}
+                sys_msg2 = {"role": "system", "content": MBTI_PERSONAS[persona2] + " Tvoj sagovornik ima drugu ličnost. Ostani u svom karakteru."}
+                
+                # Prva poruka (Korisnikova tema)
+                user_msg = {"role": "user", "content": f"Tema diskusije je: {initial_prompt}. Počnite razgovor."}
+                
+                st.session_state.dialogue_history.append(user_msg)
+                
+                # Prikazujemo korisnikovu poruku odmah
+                st.markdown(f"**MODERATOR:** {initial_prompt}")
+
+                # Prvi odgovor Modela 1
+                response_box = st.empty() # Placeholder za stream
+                with st.spinner(f"{persona1} razmišlja..."):
+                    msgs = [sys_msg1, user_msg]
+                    resp1 = chat_with_model(model1, msgs, placeholder=response_box)
+                    
+                    st.session_state.dialogue_history.append({
+                        "role": "assistant", 
+                        "content": resp1, 
+                        "model_name": f"{model1} ({persona1.split(' - ')[0]})",
+                        "side": "left"
+                    })
+                st.rerun()
+
+        with col_act2:
+            if st.session_state.dialogue_active and st.button("▶️ SLEDEĆA RUNDA"):
+                # Uzmi poslednjih par poruka za kontekst
+                history_text = ""
+                for msg in st.session_state.dialogue_history[-10:]: # Zadnjih 10 poruka
+                    if msg["role"] == "assistant":
+                        history_text += f"{msg['model_name']}: {msg['content']}\n\n"
+                    elif msg["role"] == "user":
+                        history_text += f"MODERATOR: {msg['content']}\n\n"
+
+                # Odredi ko je na redu (na osnovu "side" poslednje poruke)
+                last_msg = st.session_state.dialogue_history[-1]
+                if last_msg.get("side") == "left":
+                    # Red je na desnog (Model 2)
+                    current_model = model2
+                    current_persona = persona2
+                    current_side = "right"
+                    sys_prompt = MBTI_PERSONAS[persona2]
+                else:
+                    # Red je na levog (Model 1)
+                    current_model = model1
+                    current_persona = persona1
+                    current_side = "left"
+                    sys_prompt = MBTI_PERSONAS[persona1]
+
+                # Kreiraj prompt za modela
+                prompt_messages = [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": f"Ovo je transkript dosadašnjeg razgovora:\n{history_text}\n\nTi si na redu. Odgovori u skladu sa svojom ličnošću ({current_persona}). Budi kratak i konkretan."}
+                ]
+
+                response_box = st.empty() # Placeholder za stream
+                with st.spinner(f"{current_persona} odgovara..."):
+                    response = chat_with_model(current_model, prompt_messages, placeholder=response_box)
+                    
+                    st.session_state.dialogue_history.append({
+                        "role": "assistant", 
+                        "content": response, 
+                        "model_name": f"{current_model} ({current_persona.split(' - ')[0]})",
+                        "side": current_side
+                    })
+                st.rerun()
+
+        with col_act3:
+             if st.session_state.dialogue_history and st.button("💾 SAČUVAJ (BookCreator)"):
+                 path = save_dialogue_to_file(st.session_state.dialogue_history, initial_prompt)
+                 st.success(f"Sačuvano u: {path}")
+
+        # Intervencija moderatora
+        if st.session_state.dialogue_active:
+            mod_input = st.text_input("Intervencija moderatora (ti):", placeholder="Ubacite se u razgovor...")
+            if st.button("Ubaci komentar"):
+                st.session_state.dialogue_history.append({
+                    "role": "user",
+                    "content": mod_input,
+                    "model_name": "MODERATOR",
+                    "side": "center"
+                })
+                st.rerun()
+
+        st.markdown("---")
+        
+        # Prikaz istorije dijaloga
+        for msg in st.session_state.dialogue_history:
+            if msg["role"] == "user" and msg.get("side") != "center": continue # Preskoči početni prompt u prikazu ako želimo čist chat
+
+            side = msg.get("side", "left")
+            align = "left" if side == "left" else ("right" if side == "right" else "center")
+            color = "#FDFD96" if side == "left" else ("#b388b3" if side == "right" else "#ffffff")
+            bg = "rgba(253, 253, 150, 0.1)" if side == "left" else ("rgba(179, 136, 179, 0.1)" if side == "right" else "rgba(255,255,255,0.1)")
+            
+            st.markdown(
+                f"""
+                <div style='text-align: {align}; margin: 10px 0;'>
+                    <div style='display: inline-block; background-color: {bg}; padding: 10px; border-radius: 10px; border-left: 3px solid {color}; max-width: 80%; text-align: left;'>
+                        <small style='color: {color}; font-weight: bold;'>{msg.get('model_name', 'System')}</small><br>
+                        {msg['content']}
+                    </div>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+
+        if st.button("Zatvori dijalog"):
+            st.session_state.show_dialogue = False
+            st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+st.divider()
+
+# --- CHAT DISPLAY ---
+chat_container = st.container()
+with chat_container:
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            # Odredi avatar
+            if msg["role"] == "user":
+                avatar = "🧠"
+            else:
+                # Pokušaj da nađeš sačuvani model, ili koristi default
+                model_used = msg.get("model_name", "")
+                avatar = get_model_avatar(model_used) if model_used else "🤖"
+                
+            with st.chat_message(msg["role"], avatar=avatar):
+                st.markdown(msg["content"])
+
+# --- INPUT ---
+if prompt := st.chat_input("Command..."):
+    if len(st.session_state.messages) == 0:
+        if st.session_state.system_prompt:
+            st.session_state.messages.append({"role": "system", "content": st.session_state.system_prompt})
+        if st.session_state.file_content:
+            prompt = f"Context:\n{st.session_state.file_content}\n\nUser Question: {prompt}"
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user", avatar="🧠"):
+        st.markdown(prompt)
+
+    if selected_model:
+        # Odredi avatar za trenutni model
+        current_avatar = get_model_avatar(selected_model)
+        with st.chat_message("assistant", avatar=current_avatar):
+            response_placeholder = st.empty()
+
+            full_response = chat_with_model(selected_model, st.session_state.messages)
+
+            if full_response:
+                response_placeholder.markdown(full_response)
+                # Čuvamo i ime modela uz poruku
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "model_name": selected_model
+                })
+
+# --- INSTAPAPER READABLE CONTENT (Hidden from view, visible to save services) ---
+if st.session_state.messages:
+    chat_text = export_chat_to_text(st.session_state.messages)
+    st.markdown(f"""
+    <div id="instapaper-readable-content">
+        <pre style="white-space: pre-wrap; font-family: monospace;">{chat_text}</pre>
+    </div>
+    """, unsafe_allow_html=True)

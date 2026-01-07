@@ -1,0 +1,501 @@
+"""
+Konfiguracija aplikacije
+"""
+
+import os
+from pathlib import Path
+
+# Paths
+BASE_DIR = Path(__file__).parent
+SETTINGS_FILE = BASE_DIR / ".settings.json"
+SESSIONS_DIR = BASE_DIR / "sessions"
+
+# Model sources
+MODEL_SOURCES = ["Ollama (11434)", "Kiklop (11435)"]
+DEFAULT_MODEL_SOURCE = "Ollama (11434)"
+
+# MBTI Ličnosti i njihovi sistemski promptovi
+MBTI_PERSONAS = {
+    "INTJ - Arhitekta": "Ti si INTJ (Arhitekta). Tvoj stil je analitičan, strateški i rezervisan. Fokusiraš se na logiku, sisteme i dugoročne posledice. Često si kritičan i tražiš efikasnost. Ne voliš ćaskanje, odmah prelaziš na suštinu. Koristiš precizan jezik.",
+    "INTP - Logičar": "Ti si INTP (Logičar). Tvoj stil je apstraktan, radoznao i objektivan. Voliš teorije i pronalaženje logičkih nedoslednosti. Često preispituješ premise. Možeš delovati rasejano ili previše fokusirano na tehničke detalje.",
+    "ENTJ - Komandant": "Ti si ENTJ (Komandant). Tvoj stil je odlučan, direktan i ambiciozan. Voliš da preuzimaš vođstvo i organizuješ stvari. Fokusiran si na rezultate i efikasnost. Ponekad možeš delovati oštro ili nestrpljivo.",
+    "ENTP - Debatnik": "Ti si ENTP (Debatnik). Tvoj stil je provokativan, inovativan i energičan. Voliš intelektualne izazove i igranje đavoljeg advokata. Često skačeš s ideje na ideju. Voliš da testiraš granice argumenata.",
+    "INFJ - Zastupnik": "Ti si INFJ (Zastupnik). Tvoj stil je dubok, empatičan i idealistički. Fokusiraš se na ljudske vrednosti i skrivena značenja. Govoriš mirno ali sa strašću za svoja uverenja. Često koristiš metafore.",
+    "INFP - Posrednik": "Ti si INFP (Posrednik). Tvoj stil je poetičan, ljubazan i vođen vrednostima. Težiš harmoniji i autentičnosti. Često si sanjar i idealista. Osetljiv si na emocionalne nijanse.",
+    "ENFJ - Protagonista": "Ti si ENFJ (Protagonista). Tvoj stil je harizmatičan, inspirativan i fokusiran na ljude. Voliš da pomažeš drugima da ostvare potencijal. Prirodni si vođa koji teži konsenzusu i harmoniji.",
+    "ENFP - Aktivista": "Ti si ENFP (Aktivista). Tvoj stil je entuzijastičan, kreativan i društven. Vidiš mogućnosti svuda. Tvoj govor je pun energije i emocija. Voliš spontanost i nove ideje.",
+    "ISTJ - Logističar": "Ti si ISTJ (Logističar). Tvoj stil je praktičan, faktički i odgovoran. Ceniš tradiciju, red i pouzdanost. Govoriš jasno i konkretno. Fokusiraš se na detalje i dokazane metode.",
+    "ISFJ - Branilac": "Ti si ISFJ (Branilac). Tvoj stil je posvećen, topao i savestan. Veoma si pažljiv prema potrebama drugih. Ceniš stabilnost i harmoniju. Tvoj govor je skroman i pun podrške.",
+    "ESTJ - Izvršilac": "Ti si ESTJ (Izvršilac). Tvoj stil je direktan, organizovan i poštuje pravila. Voliš red i jasnu strukturu. Fokusiran si na činjenice i konkretne rezultate. Ceniš naporan rad.",
+    "ESFJ - Konzul": "Ti si ESFJ (Konzul). Tvoj stil je brižan, društven i lojalan. Voliš da se povezuješ s ljudima i održavaš društveni red. Veoma si praktičan u pomaganju drugima.",
+    "ISTP - Virtuoso": "Ti si ISTP (Virtuoso). Tvoj stil je logičan, prilagodljiv i fokusiran na akciju. Voliš da rastavljaš stvari i razumeš kako rade. Govoriš malo, ali konkretno. Ceniš efikasnost i slobodu.",
+    "ISFP - Avanturista": "Ti si ISFP (Avanturista). Tvoj stil je umetnički, osetljiv i spontan. Živiš u trenutku. Ne voliš konflikte i apstraktne teorije. Izražavaš se kroz dela ili estetiku pre nego kroz reči.",
+    "ESTP - Preduzetnik": "Ti si ESTP (Preduzetnik). Tvoj stil je energičan, pronicljiv i fokusiran na akciju. Voliš rizik i brzo rešavanje problema. Dosadno ti je apstraktno teoretisanje. Voliš da 'gasiš požare'.",
+    "ESFP - Zabavljač": "Ti si ESFP (Zabavljač). Tvoj stil je spontan, energičan i zabavan. Voliš da budeš u centru pažnje. Fokusiran si na 'ovde i sada'. Veoma si praktičan i društven."
+}
+
+# CSS stilovi
+CSS_STYLES = '''
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+
+/* White pulse animation - DISABLED to remove red/purple frame */
+/*
+@-webkit-keyframes white-pulse {
+    0% { border-color: #ffffff; -webkit-box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+    50% { border-color: #e0e0e0; -webkit-box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); }
+    100% { border-color: #ffffff; -webkit-box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+}
+@keyframes white-pulse {
+    0% { border-color: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+    50% { border-color: #e0e0e0; box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); }
+    100% { border-color: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.1); }
+}
+*/
+
+/* Forsiranje pozadine svuda */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp {
+    background-color: #1a1a1a !important;
+    color: #e0e0e0 !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Login page gradient - darker top, lighter bottom */
+.login-page {
+    background: linear-gradient(to bottom, #1a1a1a 0%, #262626 100%) !important;
+    min-height: 100vh;
+}
+
+/* Numeric keypad styling */
+.numpad-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 300px;
+    margin: 20px auto;
+}
+
+.numpad-container button {
+    background-color: #333 !important;
+    color: #ffffff !important;
+    border: 1px solid #444 !important;
+    border-radius: 8px !important;
+    padding: 20px !important;
+    font-size: 1.5rem !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+.numpad-container button:hover {
+    background-color: #444 !important;
+    border-color: #666 !important;
+    transform: scale(1.05) !important;
+}
+
+.numpad-container button:active {
+    background-color: #555 !important;
+    transform: scale(0.98) !important;
+}
+
+/* PIN display styling */
+.pin-display input {
+    background-color: #1a1a1a !important;
+    color: #FDFD96 !important;
+    border: 2px solid #444 !important;
+    border-radius: 8px !important;
+    padding: 15px !important;
+    font-size: 2rem !important;
+    text-align: center !important;
+    letter-spacing: 10px !important;
+    max-width: 300px !important;
+    margin: 0 auto !important;
+}
+
+.pin-display input:focus {
+    border-color: #FDFD96 !important;
+    outline: none !important;
+}
+
+/* Command button */
+.command-container {
+    margin-top: 15px;
+    margin-bottom: 15px;
+}
+
+.command-container button {
+    background-color: transparent !important;
+    color: #FDFD96 !important;
+    border: 2px solid #FDFD96 !important;
+    border-radius: 8px !important;
+    padding: 12px 30px !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.command-container button:hover {
+    background-color: #FDFD96 !important;
+    color: #1a1a1a !important;
+}
+
+/* Toolbar tags styling */
+.toolbar-tags {
+    background-color: #262626 !important;
+    padding: 15px 10px !important;
+    border-radius: 12px !important;
+    margin-top: 20px !important;
+    border: 1px solid #333 !important;
+}
+
+.tag-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.tag-buttons button {
+    background-color: transparent !important;
+    color: #d0d0d0 !important;
+    border: 1px solid #555 !important;
+    border-radius: 20px !important;
+    padding: 8px 16px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    white-space: nowrap !important;
+}
+
+.tag-buttons button:hover {
+    background-color: #444 !important;
+    color: #ffffff !important;
+    border-color: #666 !important;
+}
+
+.tag-buttons button:active {
+    background-color: #555 !important;
+    transform: scale(0.98) !important;
+}
+
+/* Uklanjanje donje margine/praznine koja može biti tamnija */
+footer { display: none !important; }
+
+.stChatInputContainer {
+    position: fixed !important;
+    bottom: 20px !important;
+    left: 50% !important;
+    -webkit-transform: translateX(-50%);
+    transform: translateX(-50%);
+    border: 1px solid #ffffff !important;
+    background-color: #262626 !important;
+    max-width: 800px !important;
+    width: 90% !important;
+    border-radius: 12px !important;
+    -webkit-animation: white-pulse 4s infinite ease-in-out;
+    animation: white-pulse 4s infinite ease-in-out;
+    z-index: 1000;
+}
+
+/* Input text - White */
+.stChatInputContainer textarea, .stChatInputContainer input {
+    color: #ffffff !important;
+    caret-color: #ffffff !important;
+}
+
+@media screen and (max-width: 1024px) {
+    .stChatInputContainer {
+        width: 85% !important;
+        max-width: 600px !important;
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .stChatInputContainer {
+        width: 90% !important;
+        bottom: 15px !important;
+    }
+
+    h2 { font-size: 1.2rem !important; }
+
+    .stButton>button {
+        padding: 10px 14px !important;
+        font-size: 0.9rem !important;
+    }
+}
+
+@media screen and (max-width: 480px) {
+    .stChatInputContainer {
+        width: 94% !important;
+        bottom: 10px !important;
+    }
+}
+
+/* Input focus - white */
+input:focus, textarea:focus, select:focus,
+.stChatInputContainer textarea:focus,
+[data-testid="stChatInputTextArea"]:focus {
+    border-color: #ffffff !important;
+    -webkit-box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3) !important;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3) !important;
+    outline: none !important;
+}
+
+/* iOS zoom fix */
+input, textarea, select {
+    font-size: 16px !important;
+}
+
+/* Buttons - NO RED/PURPLE border, just gray */
+.stButton>button {
+    background-color: transparent !important;
+    color: #d0d0d0 !important;
+    border: 1px solid #444 !important; /* SIVO umesto #b388b3 */
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    padding: 8px 16px !important;
+    min-height: 40px;
+    vertical-align: baseline !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    -webkit-transition: all 0.3s ease;
+    transition: all 0.3s ease;
+}
+
+.stButton>button:hover, .stButton>button:active {
+    background-color: #444 !important; /* SIVO umesto #b388b3 */
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.1) !important; /* BEO shadow umesto ljubičasti */
+}
+
+/* Header - yellow */
+h2, h3 { color: #FDFD96 !important; font-weight: 700 !important; }
+
+/* Messages - Paper Style (No box, no border) */
+[data-testid="stChatMessage"] {
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 20px 0 !important;
+    padding: 10px 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+}
+
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {
+    font-size: 1.1rem !important;
+    line-height: 1.6 !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    color: #e0e0e0 !important;
+}
+
+/* Monochromatic Icons - Make avatars white/grayscale */
+[data-testid="stChatMessageAvatar"] {
+    filter: grayscale(100%) brightness(200%);
+}
+
+/* Model selector - yellow label */
+.stSelectbox label { color: #FDFD96 !important; }
+
+/* Custom font for OLLAMA.CORE title - Retro ASCII Style */
+.ollama-title {
+    font-family: 'Courier New', 'Consolas', monospace !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    color: #FDFD96 !important;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Login page styling - centered with same margins as modals */
+[data-testid="stTextInput"] input[type="password"] {
+    margin: 15px auto !important;
+    max-width: 280px !important;
+    text-align: center !important;
+    padding: 10px !important;
+    border-radius: 6px !important;
+    background-color: #2a2a2a !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #444 !important;
+}
+
+/* Login container centering - match modal padding */
+[data-testid="stVerticalBlock"] > div {
+    padding: 20px !important;
+}
+
+/* Chat Input - layers above dark gray background */
+.stChatInputContainer {
+    position: fixed !important;
+    bottom: 20px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 90% !important;
+    max-width: 800px !important;
+    border: 1px solid #444 !important;
+    background-color: #222222 !important; /* Tamnije sivo */
+    border-radius: 12px !important;
+    padding: 15px 20px !important;
+    margin-bottom: 0 !important;
+    z-index: 9999 !important; /* Iznad svega */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+    -webkit-animation: white-pulse 4s infinite ease-in-out;
+    animation: white-pulse 4s infinite ease-in-out;
+}
+
+/* Layer system for buttons */
+.button-layer {
+    position: relative !important;
+    z-index: 1000 !important;
+    background-color: #252525 !important; /* Tamno sivi sloj za dugmad */
+    padding: 10px 20px !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+}
+
+/* Input textarea - dark gray almost black */
+.stChatInputContainer textarea, .stChatInputContainer input {
+    background-color: #1a1a1a !important; /* Skoro crno */
+    color: #e0e0e0 !important;
+    caret-color: #e0e0e0 !important;
+    border-color: #333 !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
+    font-size: 16px !important;
+}
+
+/* All buttons - aligned baseline, same level */
+.stButton>button {
+    background-color: transparent !important;
+    color: #d0d0d0 !important;
+    border: 1px solid #b388b3 !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    padding: 8px 16px !important;
+    min-height: 40px;
+    vertical-align: baseline !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+/* Document and other buttons - same alignment */
+[data-testid="stVerticalBlock"] .stButton>button {
+    vertical-align: baseline !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+/* Compact design - everything closer */
+[data-testid="stVerticalBlock"] {
+    margin-bottom: 6px !important;
+}
+
+[data-testid="stVerticalBlockBlock"] {
+    padding: 6px 0 !important;
+}
+
+/* Smaller buttons for toolbar */
+[data-testid="stVerticalBlockBlock"] .stButton>button {
+    padding: 6px 12px !important;
+    font-size: 0.85rem !important;
+    min-height: 36px !important;
+}
+
+/* Smooth transitions */
+* {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, border-radius 0.2s ease !important;
+}
+
+/* Divider thinner and closer */
+hr {
+    border-color: #333 !important;
+    margin: 8px 0 !important;
+}
+
+/* All containers aligned */
+[data-testid="stVerticalBlock"], [data-testid="stVerticalBlockBlock"] {
+    vertical-align: baseline !important;
+}
+
+/* Chat container - add bottom padding so text isn't covered by input */
+.main {
+    padding-bottom: 120px !important; /* Prostor za input polje */
+}
+
+[data-testid="stAppViewContainer"] {
+    padding-bottom: 120px !important;
+}
+
+[data-testid="stAppViewBlockContainer"] {
+    padding-bottom: 120px !important;
+}
+
+/* Messages - top aligned */
+[data-testid="stChatMessage"] {
+    vertical-align: top !important;
+    margin-top: 10px !important;
+}
+
+/* Hide Streamlit UI */
+header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], #MainMenu, [data-testid="stToolbar"], [data-testid="stTopLevelActions"], [data-testid="collapsedControl"] {
+    visibility: hidden !important;
+    display: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Full screen - remove all margins and padding */
+html, body {
+    height: 100vh !important;
+    width: 100vw !important;
+    overflow: hidden !important;
+}
+
+.main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 100vh !important;
+}
+
+[data-testid="stAppViewContainer"] {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 100vh !important;
+}
+
+[data-testid="stAppViewBlockContainer"] {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 100vh !important;
+}
+
+.block-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+}
+
+/* Instapaper readable content - hidden from view but available to save services */
+#instapaper-readable-content {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+/* Make content visible when printing or when Instapaper saves */
+@media print {
+    #instapaper-readable-content {
+        position: static;
+        left: auto;
+        top: auto;
+        width: 100%;
+        height: auto;
+        overflow: visible;
+        display: block;
+    }
+}
+'''

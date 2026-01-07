@@ -1,0 +1,1396 @@
+"""
+OLLAMA.CORE - AI Chat Aplikacija - Redesigned UI
+"""
+
+import streamlit as st
+import ollama
+import os
+import json
+import time
+import subprocess
+from functools import lru_cache
+
+# Custom moduli
+from config import (
+    MODEL_SOURCES,
+    DEFAULT_MODEL_SOURCE,
+    MBTI_PERSONAS,
+    CSS_STYLES,
+    SETTINGS_FILE,
+    SESSIONS_DIR,
+)
+from session import (
+    load_settings,
+    save_settings,
+    save_session,
+    load_session,
+    get_session_list,
+    delete_session,
+)
+from export import export_chat_to_text, export_chat_to_epub, export_chat_to_pdf
+from agents import (
+    web_search,
+    web_scrape,
+    analyze_document,
+    code_helper,
+    get_news_from_rss,
+    get_top_news,
+    api_caller,
+)
+from dialogue import run_dialogue, save_dialogue_to_file
+from ui_helpers import get_model_avatar
+
+# =============================================================================
+# CUSTOM CSS - NOVI DESIGN
+# =============================================================================
+
+CUSTOM_CSS = """
+/* Global reset */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* Full screen */
+html, body, .stApp {
+    height: 100vh !important;
+    width: 100vw !important;
+    overflow: hidden !important;
+    background: #000000 !important;
+}
+
+/* Hide Streamlit UI */
+header, footer, [data-testid="stSidebar"], [data-testid="stHeader"],
+#MainMenu, [data-testid="stToolbar"], [data-testid="stTopLevelActions"],
+[data-testid="collapsedControl"] {
+    display: none !important;
+}
+
+/* Container */
+.main, [data-testid="stAppViewContainer"], [data-testid="stAppViewBlockContainer"],
+.block-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 100vh !important;
+    background: transparent !important;
+}
+
+/* ==================== LANDING PAGE ==================== */
+
+.landing-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: #000000;
+    position: relative;
+    animation: fadeIn 0.5s ease-in;
+}
+
+.landing-logo {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #ff6b35;
+    text-align: center;
+    letter-spacing: 3px;
+    margin-bottom: 60px;
+    opacity: 0.9;
+}
+
+.landing-instruction {
+    color: #707070;
+    font-size: 0.9rem;
+    text-align: center;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+}
+
+.landing-input-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+}
+
+.landing-input-glow {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(45deg, #ff6b35, #ff8c5a, #ff6b35);
+    border-radius: 25px;
+    z-index: -1;
+    animation: glow 2s ease-in-out infinite alternate;
+}
+
+.landing-box {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+@keyframes glow {
+    0% {
+        opacity: 0.5;
+        box-shadow: 0 0 5px rgba(255, 107, 53, 0.5);
+    }
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 20px rgba(255, 107, 53, 0.8), 0 0 40px rgba(255, 107, 53, 0.4);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Landing page specific styles */
+.pin-input-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 400px;
+    max-width: 90%;
+}
+
+div[data-testid="stTextInput"] > div > input {
+    background: transparent !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-size: 1.5rem !important;
+    text-align: center !important;
+    letter-spacing: 8px !important;
+    padding: 20px 0 !important;
+    border-radius: 25px !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stTextInput"] > div > input::placeholder {
+    color: #505050 !important;
+    letter-spacing: 2px !important;
+}
+
+div[data-testid="stTextInput"] > div > input:focus {
+    outline: none !important;
+    border: none !important;
+}
+
+/* ==================== MAIN APP ==================== */
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #1a1a1a;
+    position: relative;
+}
+
+.app-header {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+}
+
+.app-title {
+    font-size: 4rem;
+    font-weight: 800;
+    color: #ff6b35;
+    text-align: center;
+    line-height: 1.2;
+    letter-spacing: 4px;
+}
+
+.app-title span {
+    display: block;
+}
+
+.app-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+    gap: 20px;
+}
+
+.command-button {
+    width: 100%;
+    max-width: 500px;
+    padding: 20px 40px;
+    background: #2a2a2a;
+    border: 2px solid #ff6b35;
+    border-radius: 15px;
+    color: #ffffff;
+    font-size: 1.5rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.command-button:hover {
+    background: #ff6b35;
+    color: #000000;
+    transform: scale(1.02);
+}
+
+/* ==================== PILL TAGS ==================== */
+
+.pills-container {
+    display: flex !important;
+    gap: 4px !important;
+    padding: 6px 16px !important;
+    background: #1a1a1a !important;
+    border-top: 1px solid #2a2a2a !important;
+    position: fixed !important;
+    bottom: 70px !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 999 !important;
+    justify-content: center !important;
+    flex-wrap: wrap !important;
+}
+
+.pill-button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 4px 10px !important;
+    background: #2a2a2a !important;
+    border: 1px solid #3a3a3a !important;
+    border-radius: 8px !important;
+    color: #909090 !important;
+    font-size: 0.6rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    min-width: 50px !important;
+    user-select: none !important;
+    line-height: 1 !important;
+}
+
+.pill-button:hover {
+    background: #3a3a3a !important;
+    border-color: #4a4a4a !important;
+    color: #b0b0b0 !important;
+}
+
+.pill-button.pill-active {
+    background: #ff6b35 !important;
+    border-color: #ff6b35 !important;
+    color: #000000 !important;
+}
+
+/* ==================== CHAT MESSAGES ==================== */
+
+.chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: #1a1a1a;
+}
+
+.chat-message {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 20px;
+    border-radius: 15px;
+    animation: fadeIn 0.3s ease;
+}
+
+.chat-message.user {
+    background: #2a2a2a;
+    border-left: 4px solid #ff6b35;
+}
+
+.chat-message.assistant {
+    background: #252525;
+    border-left: 4px solid #4a90a4;
+}
+
+.chat-message-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #ff6b35;
+}
+
+.chat-message-content {
+    color: #e0e0e0;
+    font-size: 1rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ==================== MODAL PANELS ==================== */
+
+.modal-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #252525;
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 90%;
+    max-height: 90%;
+    overflow-y: auto;
+    z-index: 10000;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    border: 1px solid #3a3a3a;
+}
+
+.modal-header {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #ff6b35;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.modal-content {
+    color: #e0e0e0;
+}
+
+/* ==================== INPUT AREA ==================== */
+
+.input-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px;
+    background: #1a1a1a;
+    border-top: 1px solid #2a2a2a;
+    z-index: 1000;
+}
+
+.input-wrapper {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+/* ==================== RESPONSIVE ==================== */
+
+@media (max-width: 768px) {
+    .app-title {
+        font-size: 2.5rem;
+    }
+
+    .pill-tags-container {
+        gap: 8px;
+    }
+
+    .pill-tag {
+        padding: 10px 18px;
+        font-size: 0.8rem;
+    }
+
+    .command-button {
+        font-size: 1.2rem;
+        padding: 15px 30px;
+    }
+
+    .chat-container {
+        padding: 15px;
+    }
+
+    .chat-message {
+        padding: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .app-title {
+        font-size: 2rem;
+    }
+
+    .pill-tags-container {
+        gap: 6px;
+    }
+
+    .pill-tag {
+        padding: 8px 14px;
+        font-size: 0.75rem;
+    }
+
+    .command-button {
+        font-size: 1rem;
+        padding: 12px 20px;
+    }
+
+    .chat-container {
+        padding: 10px;
+    }
+
+    .chat-message {
+        padding: 12px;
+    }
+}
+
+/* Hide elements */
+div[data-testid="stChatMessageAvatar"] {
+    display: none;
+}
+
+.stChatInputContainer {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+.stChatInputContainer textarea,
+.stChatInputContainer input {
+    background: #2a2a2a !important;
+    border: 2px solid #3a3a3a !important;
+    border-radius: 15px !important;
+    color: #e0e0e0 !important;
+    font-size: 1rem !important;
+    padding: 15px 20px !important;
+}
+
+.stChatInputContainer textarea:focus,
+.stChatInputContainer input:focus {
+    border-color: #ff6b35 !important;
+    outline: none !important;
+}
+
+.stButton > button {
+    background: #2a2a2a !important;
+    border: 1px solid #3a3a3a !important;
+    border-radius: 15px !important;
+    color: #e0e0e0 !important;
+    font-weight: 500 !important;
+    transition: all 0.3s ease !important;
+}
+
+.stButton > button:hover {
+    background: #ff6b35 !important;
+    border-color: #ff6b35 !important;
+    color: #000000 !important;
+}
+
+/* Smooth transitions */
+* {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+"""
+
+st.markdown(f"<style>{CUSTOM_CSS}</style>", unsafe_allow_html=True)
+
+# =============================================================================
+# FUNKCIJE
+# =============================================================================
+
+
+@st.cache_data(ttl=300)
+def get_models():
+    try:
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
+        if result.returncode == 0:
+            models = []
+            for line in result.stdout.strip().split("\n"):
+                if " -> " in line:
+                    model_name = line.strip()
+                    if model_name:
+                        models.append(model_name)
+            return models
+    except Exception as e:
+        return []
+    return []
+
+
+def chat_with_model(model, messages, placeholder=None):
+    start_time = time.time()
+    full_response = ""
+
+    cache_key = json.dumps([model, messages], sort_keys=True, default=str)
+
+    if "response_cache" not in st.session_state:
+        st.session_state.response_cache = {}
+
+    if cache_key in st.session_state.response_cache:
+        cached_response = st.session_state.response_cache[cache_key]
+        duration = time.time() - start_time
+        if placeholder:
+            placeholder.markdown(cached_response)
+        return cached_response
+
+    try:
+        stream = ollama.chat(
+            model=model,
+            messages=messages,
+            stream=True,
+            options={"num_ctx": 1024, "temperature": 0.7, "num_threads": 4},
+        )
+
+        for chunk in stream:
+            content = chunk["message"]["content"]
+            full_response += content
+
+            if placeholder:
+                placeholder.markdown(full_response + "▌")
+
+            if len(full_response) % 100 == 0:
+                time.sleep(0.01)
+
+        if placeholder:
+            placeholder.markdown(full_response)
+
+        duration = time.time() - start_time
+
+        uncertainty_indicators = [
+            "nemam dovoljno informacija",
+            "nije mi poznato",
+            "ne mogu da potvrdim",
+            "ne znam tačno",
+            "nije mi poznat",
+            "ne mogu da pronađem",
+            "nemam informaciju",
+            "nije dostupno",
+            "nije poznato",
+            "nemam podatak",
+        ]
+
+        is_uncertain = any(
+            indicator in full_response.lower() for indicator in uncertainty_indicators
+        )
+
+        if is_uncertain:
+            user_query = messages[-1]["content"] if messages else ""
+            if user_query:
+                search_results = web_search(user_query, num_results=3)
+
+                if search_results and "error" not in search_results[0]:
+                    search_context = "Pronađene informacije iz web pretrage:\n"
+                    for i, result in enumerate(search_results):
+                        search_context += (
+                            f"{i + 1}. {result['title']}: {result['snippet']}\n"
+                        )
+
+                    enhanced_messages = messages + [
+                        {
+                            "role": "user",
+                            "content": f"{user_query}\n\nKontekst iz web pretrage:\n{search_context}",
+                        }
+                    ]
+
+                    enhanced_stream = ollama.chat(
+                        model=model,
+                        messages=enhanced_messages,
+                        stream=True,
+                        options={"num_ctx": 1024, "temperature": 0.7, "num_threads": 4},
+                    )
+
+                    full_response = ""
+                    for chunk in enhanced_stream:
+                        content = chunk["message"]["content"]
+                        full_response += content
+
+                        if len(full_response) % 100 == 0:
+                            time.sleep(0.01)
+
+        st.session_state.response_cache[cache_key] = full_response
+        auto_save_settings()
+
+        return full_response
+
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None
+
+
+def auto_save_settings():
+    try:
+        settings = {
+            "system_prompt": st.session_state.get("system_prompt", ""),
+            "last_model": st.session_state.get("last_model", ""),
+            "file_content": st.session_state.get("file_content", ""),
+            "messages": st.session_state.get("messages", []),
+            "chat_document": st.session_state.get("chat_document", ""),
+        }
+        save_settings(settings)
+    except:
+        pass
+
+
+# =============================================================================
+# INITIALIZATION
+# =============================================================================
+
+if "model_source" not in st.session_state:
+    st.session_state.model_source = DEFAULT_MODEL_SOURCE
+
+os.environ["OLLAMA_HOST"] = st.session_state.model_source.split(" (")[1].replace(
+    ")", ""
+)
+
+st.set_page_config(
+    page_title="OLLAMA.CORE", layout="wide", initial_sidebar_state="collapsed"
+)
+
+saved_settings = load_settings()
+
+for key in [
+    "authenticated",
+    "messages",
+    "system_prompt",
+    "file_content",
+    "show_system",
+    "show_files",
+    "last_model",
+    "response_cache",
+    "show_agents",
+    "show_dialogue",
+    "show_history",
+    "current_session_file",
+    "chat_document",
+    "show_multi_debate",
+    "show_export",
+]:
+    if key not in st.session_state:
+        if key == "authenticated":
+            st.session_state[key] = False
+        elif key in [
+            "show_system",
+            "show_files",
+            "show_agents",
+            "show_dialogue",
+            "show_history",
+            "show_export",
+            "show_multi_debate",
+        ]:
+            st.session_state[key] = False
+        elif key == "messages":
+            st.session_state[key] = saved_settings.get("messages", [])
+        elif key == "system_prompt":
+            st.session_state[key] = saved_settings.get("system_prompt", "")
+        elif key == "file_content":
+            st.session_state[key] = saved_settings.get("file_content", "")
+        elif key == "last_model":
+            st.session_state[key] = saved_settings.get("last_model", "")
+        elif key == "chat_document":
+            st.session_state[key] = saved_settings.get("chat_document", "")
+        elif key == "response_cache":
+            st.session_state[key] = {}
+
+# =============================================================================
+# LANDING PAGE
+# =============================================================================
+
+if not st.session_state.authenticated:
+    st.markdown(
+        """
+    <div class="landing-container">
+        <div class="landing-logo">OLLAMA.CORE</div>
+        <div class="landing-instruction">Unesite pristupni kod</div>
+        <div class="landing-input-wrapper">
+            <div class="landing-input-glow"></div>
+            <div class="landing-box">
+            </div>
+        </div>
+    </div>
+    <div class="pin-input-container">
+    """,
+        unsafe_allow_html=True,
+    )
+
+    pin_input = st.text_input(
+        "", type="password", max_chars=4, key="pin_input", label_visibility="collapsed"
+    )
+
+    st.markdown(
+        """
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    if len(st.session_state.pin_input) == 4:
+        if st.session_state.pin_input == "2020":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.session_state.pin_input = ""
+
+    st.stop()
+
+# =============================================================================
+# MAIN APP - HEADER
+# =============================================================================
+
+st.markdown(
+    """
+<div class="app-header">
+    <div class="app-title">
+        <span>OLLAMA</span>
+        <span>CORE</span>
+    </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+# =============================================================================
+# MODALNI PANELI
+# =============================================================================
+
+# SYSTEM PANEL
+if st.session_state.show_system:
+    st.markdown("<div class='modal-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='modal-header'>⚙️ SYSTEM INSTRUCTION</div>", unsafe_allow_html=True
+    )
+    new_prompt = st.text_area(
+        "System prompt:", value=st.session_state.system_prompt, height=150
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Save", key="system_save"):
+            st.session_state.system_prompt = new_prompt
+            st.session_state.show_system = False
+            auto_save_settings()
+            st.rerun()
+    with col2:
+        if st.button("✖️ Close", key="system_close"):
+            st.session_state.show_system = False
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# HISTORY PANEL
+if st.session_state.show_history:
+    st.markdown("<div class='modal-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='modal-header'>💾 SAVED SESSIONS</div>", unsafe_allow_html=True
+    )
+
+    if st.session_state.messages:
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            new_session_name = st.text_input(
+                "Session name (optional):", placeholder="Leave empty for auto-name"
+            )
+        with c2:
+            if st.button("💾 Save Current", key="history_save"):
+                filename = new_session_name + ".json" if new_session_name else None
+                saved_name = save_session(st.session_state.messages, filename)
+                if saved_name:
+                    st.session_state.current_session_file = saved_name
+                    auto_save_settings()
+                    st.success(f"Saved: {saved_name}")
+                    time.sleep(1)
+                    st.rerun()
+
+    st.divider()
+
+    sessions = get_session_list()
+    if not sessions:
+        st.info("No saved sessions yet.")
+    else:
+        for sess in sessions:
+            col_name, col_load, col_del = st.columns([4, 1, 1])
+            with col_name:
+                st.write(f"📄 {sess}")
+            with col_load:
+                if st.button("📂", key=f"load_{sess}"):
+                    loaded_msgs = load_session(sess)
+                    if loaded_msgs:
+                        st.session_state.messages = loaded_msgs
+                        st.session_state.current_session_file = sess
+                        auto_save_settings()
+                        st.session_state.show_history = False
+                        st.rerun()
+            with col_del:
+                if st.button("🗑️", key=f"del_{sess}"):
+                    delete_session(sess)
+                    auto_save_settings()
+                    st.rerun()
+
+    if st.button("✖️ Close", key="history_close"):
+        st.session_state.show_history = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# AGENTS PANEL
+if st.session_state.show_agents:
+    st.markdown("<div class='modal-panel'>", unsafe_allow_html=True)
+    st.markdown("<div class='modal-header'>🤖 AI AGENTS</div>", unsafe_allow_html=True)
+
+    agent_option = st.selectbox(
+        "Select agent:",
+        [
+            "",
+            "🔍 Web Search",
+            "🕷️ Web Scrape",
+            "📄 Documents",
+            "💻 Code Helper",
+            "📰 News",
+            "🔌 API Call",
+        ],
+    )
+
+    if agent_option == "🔍 Web Search":
+        query = st.text_input("Search query:")
+        if st.button("🔍 Search", key="web_search"):
+            if query:
+                with st.spinner("Searching web..."):
+                    results = web_search(query)
+                    if results and "error" not in results[0]:
+                        st.success(f"Found {len(results)} results:")
+                        for i, result in enumerate(results):
+                            with st.expander(f"Result {i + 1}: {result['title']}"):
+                                st.write(f"**Link:** {result['link']}")
+                                st.write(f"**Description:** {result['snippet']}")
+                    else:
+                        st.error(
+                            f"Search error: {results[0]['error'] if results else 'No results'}"
+                        )
+
+    elif agent_option == "🕷️ Web Scrape":
+        url = st.text_input("URL to scrape:")
+        if st.button("🕷️ Scrape", key="web_scrape"):
+            if url:
+                with st.spinner("Scraping page..."):
+                    content = web_scrape(url)
+                    if not content.startswith("Greška"):
+                        st.success("Page scraped successfully:")
+                        st.text_area("Page content:", content, height=200)
+                    else:
+                        st.error(content)
+
+    elif agent_option == "📄 Documents":
+        uploaded_doc = st.file_uploader(
+            "Upload document (PDF, TXT, EPUB):", type=["pdf", "txt", "docx", "epub"]
+        )
+        if uploaded_doc:
+            with st.spinner("Analyzing document..."):
+                content = analyze_document(uploaded_doc)
+                st.success("Document analyzed successfully:")
+                with st.expander("Show document content"):
+                    st.text_area("Document content:", content, height=300)
+
+    elif agent_option == "💻 Code Helper":
+        code_input = st.text_area("Enter code to analyze:", height=200)
+        task_option = st.selectbox("Task:", ["analyze", "debug", "explain"])
+        if st.button("🔧 Process code", key="code_helper"):
+            if code_input:
+                with st.spinner("Analyzing code..."):
+                    result = code_helper(code_input, task_option)
+                    st.text_area("Result:", result, height=200)
+
+    elif agent_option == "📰 News":
+        if st.button("📰 Fetch news", key="fetch_news"):
+            with st.spinner("Fetching news..."):
+                news = get_top_news()
+                for source, articles in news.items():
+                    with st.expander(f"**{source}**"):
+                        if not articles or (
+                            "error" in articles[0]
+                            if isinstance(articles[0], dict) and "error" in articles[0]
+                            else False
+                        ):
+                            error_msg = (
+                                articles[0]["error"]
+                                if articles
+                                and isinstance(articles[0], dict)
+                                and "error" in articles[0]
+                                else "No news available"
+                            )
+                            st.error(error_msg)
+                        else:
+                            for i, article in enumerate(articles):
+                                st.write(f"**{article['title']}**")
+                                st.write(f"*{article['published']}*")
+                                st.write(f"{article['summary'][:200]}...")
+                                st.write(f"[Link]({article['link']})")
+                                st.markdown("---")
+
+    elif agent_option == "🔌 API Call":
+        api_url = st.text_input("API URL:")
+        api_method = st.selectbox("Method:", ["GET", "POST", "PUT", "DELETE"])
+        api_headers = st.text_area(
+            "Headers (JSON):",
+            placeholder='{"Content-Type": "application/json"}',
+            height=100,
+        )
+        api_data = st.text_area(
+            "Data (for POST/PUT):", placeholder='{"key": "value"}', height=150
+        )
+
+        if st.button("🔌 Call API", key="api_call"):
+            if api_url:
+                with st.spinner("Calling API..."):
+                    try:
+                        headers = (
+                            json.loads(api_headers) if api_headers.strip() else None
+                        )
+                        data = json.loads(api_data) if api_data.strip() else None
+                        result = api_caller(api_url, api_method, headers, data)
+                        if isinstance(result, dict) or isinstance(result, list):
+                            st.json(result)
+                        else:
+                            st.text_area("Response:", result, height=300)
+                    except json.JSONDecodeError as e:
+                        st.error(f"JSON parse error: {str(e)}")
+
+    if st.button("✖️ Close", key="agents_close"):
+        st.session_state.show_agents = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# DIALOG PANEL
+if st.session_state.show_dialogue:
+    st.markdown("<div class='modal-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='modal-header'>💬 AI DEBATE (16 Personalities)</div>",
+        unsafe_allow_html=True,
+    )
+
+    model_names = get_models()
+
+    if "dialogue_history" not in st.session_state:
+        st.session_state.dialogue_history = []
+    if "dialogue_active" not in st.session_state:
+        st.session_state.dialogue_active = False
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Left Corner")
+        model1 = st.selectbox("Model 1:", model_names, key="m1_sel")
+        persona1 = st.selectbox(
+            "Personality 1:", list(MBTI_PERSONAS.keys()), key="p1_sel", index=0
+        )
+
+    with c2:
+        st.markdown("#### Right Corner")
+        model2 = st.selectbox(
+            "Model 2:",
+            model_names,
+            key="m2_sel",
+            index=1 if len(model_names) > 1 else 0,
+        )
+        persona2 = st.selectbox(
+            "Personality 2:", list(MBTI_PERSONAS.keys()), key="p2_sel", index=3
+        )
+
+    initial_prompt = st.text_area("Debate topic / Initial scenario:", height=100)
+
+    col_act1, col_act2, col_act3 = st.columns([1, 1, 1])
+
+    with col_act1:
+        if st.button("🚀 Start Debate", key="start_debate"):
+            st.session_state.dialogue_history = []
+            st.session_state.dialogue_active = True
+
+            sys_msg1 = {
+                "role": "system",
+                "content": MBTI_PERSONAS[persona1]
+                + " Your conversational partner has a different personality. Stay in character.",
+            }
+            sys_msg2 = {
+                "role": "system",
+                "content": MBTI_PERSONAS[persona2]
+                + " Your conversational partner has a different personality. Stay in character.",
+            }
+
+            user_msg = {
+                "role": "user",
+                "content": f"The discussion topic is: {initial_prompt}. Start the conversation.",
+            }
+
+            st.session_state.dialogue_history.append(user_msg)
+
+            st.markdown(f"**MODERATOR:** {initial_prompt}")
+
+            response_box = st.empty()
+            with st.spinner(f"{persona1} is thinking..."):
+                msgs = [sys_msg1, user_msg]
+                resp1 = chat_with_model(model1, msgs, placeholder=response_box)
+
+                st.session_state.dialogue_history.append(
+                    {
+                        "role": "assistant",
+                        "content": resp1,
+                        "model_name": f"{model1} ({persona1.split(' - ')[0]})",
+                        "side": "left",
+                    }
+                )
+            st.rerun()
+
+    with col_act2:
+        if st.session_state.dialogue_active and st.button(
+            "▶️ Next Round", key="next_round"
+        ):
+            history_text = ""
+            for msg in st.session_state.dialogue_history[-10:]:
+                if msg["role"] == "assistant":
+                    history_text += f"{msg['model_name']}: {msg['content']}\n\n"
+                elif msg["role"] == "user":
+                    history_text += f"MODERATOR: {msg['content']}\n\n"
+
+            last_msg = st.session_state.dialogue_history[-1]
+            if last_msg.get("side") == "left":
+                current_model = model2
+                current_persona = persona2
+                current_side = "right"
+                sys_prompt = MBTI_PERSONAS[persona2]
+            else:
+                current_model = model1
+                current_persona = persona1
+                current_side = "left"
+                sys_prompt = MBTI_PERSONAS[persona1]
+
+            prompt_messages = [
+                {"role": "system", "content": sys_prompt},
+                {
+                    "role": "user",
+                    "content": f"This is the conversation transcript so far:\n{history_text}\n\nYou're up next. Respond according to your personality ({current_persona}). Be brief and concise.",
+                },
+            ]
+
+            response_box = st.empty()
+            with st.spinner(f"{current_persona} is responding..."):
+                response = chat_with_model(
+                    current_model, prompt_messages, placeholder=response_box
+                )
+
+                st.session_state.dialogue_history.append(
+                    {
+                        "role": "assistant",
+                        "content": response,
+                        "model_name": f"{current_model} ({current_persona.split(' - ')[0]})",
+                        "side": current_side,
+                    }
+                )
+            st.rerun()
+
+    with col_act3:
+        if st.session_state.dialogue_history and st.button(
+            "💾 Save", key="save_debate"
+        ):
+            path = save_dialogue_to_file(
+                st.session_state.dialogue_history, initial_prompt
+            )
+            st.success(f"Saved to: {path}")
+
+    if st.session_state.dialogue_active:
+        mod_input = st.text_input(
+            "Moderator intervention:", placeholder="Jump into the conversation..."
+        )
+        if st.button("💬 Insert comment", key="insert_comment"):
+            st.session_state.dialogue_history.append(
+                {
+                    "role": "user",
+                    "content": mod_input,
+                    "model_name": "MODERATOR",
+                    "side": "center",
+                }
+            )
+            st.rerun()
+
+    st.markdown("---")
+
+    for msg in st.session_state.dialogue_history:
+        if msg["role"] == "user" and msg.get("side") != "center":
+            continue
+
+        side = msg.get("side", "left")
+        align = "left" if side == "left" else ("right" if side == "right" else "center")
+        color = (
+            "#FDFD96"
+            if side == "left"
+            else ("#b388b3" if side == "right" else "#ffffff")
+        )
+        bg = (
+            "rgba(253, 253, 150, 0.1)"
+            if side == "left"
+            else (
+                "rgba(179, 136, 179, 0.1)"
+                if side == "right"
+                else "rgba(255,255,255,0.1)"
+            )
+        )
+
+        st.markdown(
+            f"""
+            <div style='text-align: {align}; margin: 10px 0;'>
+                <div style='display: inline-block; background-color: {bg}; padding: 10px; border-radius: 10px; border-left: 3px solid {color}; max-width: 80%; text-align: left;'>
+                    <small style='color: {color}; font-weight: bold;'>{msg.get("model_name", "System")}</small><br>
+                    {msg["content"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if st.button("✖️ Close", key="dialogue_close"):
+        st.session_state.show_dialogue = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# EXPORT PANEL
+if st.session_state.show_export:
+    st.markdown("<div class='modal-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='modal-header'>📋 EXPORT CHAT</div>", unsafe_allow_html=True
+    )
+
+    if st.session_state.messages:
+        c1, c2, c3, c4 = st.columns(4)
+
+        with c1:
+            chat_text = export_chat_to_text(st.session_state.messages)
+            filename_txt = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+            st.download_button(
+                label="📄 TXT",
+                data=chat_text,
+                file_name=filename_txt,
+                mime="text/plain",
+                key="download_txt",
+                use_container_width=True,
+            )
+
+        with c2:
+            filename_epub = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.epub"
+            if export_chat_to_epub(st.session_state.messages, filename_epub):
+                with open(filename_epub, "rb") as f:
+                    st.download_button(
+                        label="📚 EPUB",
+                        data=f.read(),
+                        file_name=filename_epub,
+                        mime="application/epub+zip",
+                        key="download_epub",
+                        use_container_width=True,
+                    )
+            else:
+                st.error("EPUB error")
+
+        with c3:
+            filename_pdf = f"ollama_chat_{time.strftime('%Y%m%d_%H%M%S')}.pdf"
+            if export_chat_to_pdf(st.session_state.messages, filename_pdf):
+                with open(filename_pdf, "rb") as f:
+                    st.download_button(
+                        label="📕 PDF",
+                        data=f.read(),
+                        file_name=filename_pdf,
+                        mime="application/pdf",
+                        key="download_pdf",
+                        use_container_width=True,
+                    )
+            else:
+                st.error("PDF error")
+
+        with c4:
+            clean_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OLLAMA.CORE - Chat Export</title>
+                <style>
+                    body {{ font-family: Georgia, serif; line-height: 1.6; color: #000; background-color: #fff; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                    .header {{ text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px; }}
+                    .message {{ margin: 20px 0; padding: 15px; border-left: 4px solid #333; background-color: #f5f5f5; }}
+                    .user {{ border-left-color: #666; }}
+                    .assistant {{ border-left-color: #999; }}
+                    .role {{ font-weight: bold; color: #333; margin-bottom: 10px; }}
+                    .content {{ white-space: pre-wrap; }}
+                    .separator {{ border-top: 1px solid #ccc; margin: 30px 0; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>OLLAMA.CORE - Chat Export</h1>
+                    <p>Date: {time.strftime("%Y-%m-%d %H:%M:%S")}</p>
+                    <p>Total messages: {len([m for m in st.session_state.messages if m["role"] != "system"])}</p>
+                </div>
+            """
+
+            for msg in st.session_state.messages:
+                if msg["role"] == "system":
+                    continue
+
+                role = msg["role"].upper()
+                model = msg.get("model_name", "")
+                content = msg["content"]
+
+                if msg["role"] == "user":
+                    clean_html += f'<div class="message user"><div class="role">[{role}]</div><div class="content">{content}</div></div>'
+                else:
+                    clean_html += f'<div class="message assistant"><div class="role">[{role} - {model}]</div><div class="content">{content}</div></div>'
+
+                clean_html += '<div class="separator"></div>'
+
+            clean_html += """
+            </body>
+            </html>
+            """
+
+            st.download_button(
+                label="🖨️ PRINT",
+                data=clean_html,
+                file_name=f"ollama_chat_print_{time.strftime('%Y%m%d_%H%M%S')}.html",
+                mime="text/html",
+                key="download_print",
+                help="Open in new tab and Print → Save as PDF",
+                use_container_width=True,
+            )
+    else:
+        st.warning("No messages to export")
+
+    if st.button("✖️ Close", key="export_close"):
+        st.session_state.show_export = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# =============================================================================
+# CHAT DISPLAY
+# =============================================================================
+
+st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
+
+for msg in st.session_state.messages:
+    if msg["role"] != "system":
+        msg_class = "user" if msg["role"] == "user" else "assistant"
+        avatar = (
+            "🧠"
+            if msg["role"] == "user"
+            else (
+                get_model_avatar(msg.get("model_name", ""))
+                if msg.get("model_name")
+                else "🤖"
+            )
+        )
+
+        st.markdown(
+            f"""
+        <div class='chat-message {msg_class}'>
+            <div class='chat-message-header'>
+                <span>{avatar}</span>
+                <span>{"USER" if msg["role"] == "user" else msg.get("model_name", "AI")}</span>
+            </div>
+            <div class='chat-message-content'>{msg["content"]}</div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# =============================================================================
+# PILL TAGS
+# =============================================================================
+# PILL TAGS
+# =============================================================================
+
+# Add pill tags as inline buttons
+pill_data = [
+    ("📁", "show_files"),
+    ("⚙️", "show_system"),
+    ("💾", "show_history"),
+    ("🤖", "show_agents"),
+    ("💬", "show_dialogue"),
+    ("📋", "show_export"),
+]
+
+# Create container for pills
+st.markdown(
+    """
+<div class="pills-container">
+""",
+    unsafe_allow_html=True,
+)
+
+# Create pills using buttons
+for icon, state_key in pill_data:
+    is_active = st.session_state.get(state_key, False)
+    active_class = "pill-active" if is_active else "pill-inactive"
+
+    st.markdown(
+        f"""
+    <div class="pill-button {active_class}" onclick="document.getElementById('pill_{state_key}').click()">
+        {icon}
+    </div>
+    <button id="pill_{state_key}" style="display:none;" onclick="console.log('clicked')"></button>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Hidden button to handle state
+    if st.button("", key=f"pill_{state_key}", help=f"Toggle {state_key}"):
+        st.session_state[state_key] = not st.session_state.get(state_key, False)
+        st.rerun()
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# =============================================================================
+# INPUT AREA
+# =============================================================================
+
+if prompt := st.chat_input("Command..."):
+    if len(st.session_state.messages) == 0:
+        if st.session_state.system_prompt:
+            st.session_state.messages.append(
+                {"role": "system", "content": st.session_state.system_prompt}
+            )
+
+    if st.session_state.get("chat_document"):
+        prompt = f"Context from document:\n{st.session_state.chat_document}\n\nUser Question: {prompt}"
+
+    if st.session_state.file_content:
+        prompt = f"Context:\n{st.session_state.file_content}\n\nUser Question: {prompt}"
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    model_names = get_models()
+    selected_model = (
+        st.session_state.last_model
+        if st.session_state.last_model in model_names
+        else (model_names[0] if model_names else None)
+    )
+
+    if selected_model:
+        full_response = chat_with_model(selected_model, st.session_state.messages)
+
+        if full_response:
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": full_response,
+                    "model_name": selected_model,
+                }
+            )
+            st.rerun()

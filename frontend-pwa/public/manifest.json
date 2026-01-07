@@ -1,0 +1,13 @@
+{
+  "name": "OLLAMA.CORE",
+  "short_name": "OLLAMA",
+  "description": "Private AI Chat Application",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#ff6b35",
+  "orientation": "portrait",
+  "categories": ["productivity", "utilities"],
+  "lang": "en",
+  "icons": []
+}

@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #ff6b35;
+  --color-secondary: #2a2a2a;
+  --color-accent: #fdfd96;
+  --color-background: #1a1a1a;
+  --color-surface: #2a2a2a;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    background-color: var(--color-background);
+    color: white;
+    min-height: screen;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    background-color: var(--color-primary);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-weight: 500;
+    transition: all 200ms;
+  }
+  .btn-primary:hover {
+    opacity: 0.8;
+  }
+  .btn-primary:active {
+    scale: 0.95;
+  }
+  
+  .btn-secondary {
+    background-color: var(--color-surface);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-weight: 500;
+    border: 1px solid rgb(75 85 99);
+    transition: all 200ms;
+  }
+  .btn-secondary:hover {
+    background-color: rgb(55 65 81);
+  }
+  .btn-secondary:active {
+    scale: 0.95;
+  }
+  
+  .pill-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 200ms;
+  }
+  .pill-btn:active {
+    scale: 0.95;
+  }
+  
+  .pill-btn-active {
+    background-color: var(--color-primary);
+    color: white;
+  }
+  
+  .pill-btn-inactive {
+    background-color: var(--color-surface);
+    color: rgb(209 213 219);
+  }
+  .pill-btn-inactive:hover {
+    background-color: rgb(55 65 81);
+  }
+}
